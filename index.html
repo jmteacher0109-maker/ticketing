@@ -103,6 +103,13 @@
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     const nowMs = () => Date.now();
 
+    // 6x5 고정 표(그리드) 설정
+    const GRID_COLS = 6;
+    const GRID_ROWS = 5;
+    const CELL_W = 130;
+    const CELL_H = 95;
+    const GRID_MARGIN = 24;
+
     const normalizeRoomCode = (s) => (s || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
     const isValidRoomCode = (s) => /^[A-Z0-9]{3,12}$/.test(s);
 
@@ -266,7 +273,14 @@
         const { seatId, startX, startY, origX, origY } = dragRef.current;
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
-        setGhostPos({ seatId, x: origX + dx, y: origY + dy });
+        // 드래그는 표 칸 기준으로 스냅(이동)
+        const rawX = origX + dx;
+        const rawY = origY + dy;
+        const col = clamp(Math.round((rawX - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
+        const row = clamp(Math.round((rawY - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
+        const snapX = GRID_MARGIN + col * CELL_W;
+        const snapY = GRID_MARGIN + row * CELL_H;
+        setGhostPos({ seatId, x: snapX, y: snapY });
       }, []);
 
       const endDrag = React.useCallback(async () => {
@@ -274,8 +288,8 @@
         if (!d) return;
         dragRef.current = null;
         if (ghostPos && ghostPos.seatId === d.seatId) {
-          const x = Math.round(clamp(ghostPos.x, 0, 2000));
-          const y = Math.round(clamp(ghostPos.y, 0, 2000));
+          const x = Math.round(ghostPos.x);
+          const y = Math.round(ghostPos.y);
           setGhostPos(null);
           await onSeatDragCommit?.(d.seatId, { x, y });
         } else {
@@ -333,7 +347,16 @@
             onClick={() => setSelectedSeatId(null)}
           >
             {/* Canvas area */}
-            <div className="relative" style={{ width: 1400, height: 900 }}>
+            <div
+                className="relative"
+                style={{
+                  width: GRID_MARGIN * 2 + GRID_COLS * CELL_W,
+                  height: GRID_MARGIN * 2 + GRID_ROWS * CELL_H,
+                  backgroundImage: `linear-gradient(to right, rgba(120,120,120,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(120,120,120,0.12) 1px, transparent 1px)`,
+                  backgroundSize: `${CELL_W}px ${CELL_H}px`,
+                  backgroundPosition: `${GRID_MARGIN}px ${GRID_MARGIN}px`,
+                }}
+              >
               {seatList.map(renderSeat)}
             </div>
           </div>
@@ -351,6 +374,9 @@
       const [screen, setScreen] = React.useState('home'); // home | adminCreate | adminRoom | studentJoin | studentRoom
       const [role, setRole] = React.useState(null); // 'admin' | 'student'
       const [roomCode, setRoomCode] = React.useState('');
+
+      // 학생 입장 화면에서 타이핑 중 roomCode가 바뀌며 화면이 튀는 문제를 막기 위한 별도 입력값
+      const [joinRoomCode, setJoinRoomCode] = React.useState('');
 
       const [toastMsg, setToastMsg] = React.useState(null);
       const [modal, setModal] = React.useState(null);
@@ -482,12 +508,40 @@
 
       const addSeat = async () => {
         if (!isAdmin) return;
+        if (room?.status && room.status !== 'lobby') {
+          return alertModal('추가 불가', '대기중(lobby)일 때만 책상을 추가할 수 있어요.');
+        }
+
+        // 현재 사용 중인 칸(6x5) 체크
+        const taken = new Set(
+          Object.values(seats || {}).map((s) => {
+            const col = Math.round(((s.x ?? GRID_MARGIN) - GRID_MARGIN) / CELL_W);
+            const row = Math.round(((s.y ?? GRID_MARGIN) - GRID_MARGIN) / CELL_H);
+            return `${row},${col}`;
+          })
+        );
+
+        let found = null
+        for (let r = 0; r < GRID_ROWS; r++) {
+          for (let c = 0; c < GRID_COLS; c++) {
+            if (!taken.has(`${r},${c}`)) {
+              found = { r, c };
+              break;
+            }
+          }
+          if (found) break;
+        }
+
+        if (!found) {
+          return alertModal('추가 불가', '6x5 표(30칸)가 모두 찼습니다.');
+        }
+
         const id = `S${nowMs().toString(36).toUpperCase()}`;
         const seatRef = doc(db, 'rooms', roomCode, 'seats', id);
         await setDoc(seatRef, {
           id,
-          x: 40,
-          y: 40,
+          x: GRID_MARGIN + found.c * CELL_W,
+          y: GRID_MARGIN + found.r * CELL_H,
           restriction: 'A',
           occupiedBy: null,
           occupiedName: null,
@@ -500,30 +554,52 @@
 
       const autoLayout = async () => {
         if (!isAdmin) return;
-        const ok = await confirmModal('자동 배치', `인원 수(${room?.capacity ?? capacity}명) 만큼 책상을 자동 생성할까요?\n(기존 책상은 삭제하지 않습니다)`);
-        if (!ok) return;
-        const cap = room?.capacity ?? clamp(Number(capacity || 0), 1, 60);
-        const cols = Math.ceil(Math.sqrt(cap));
-        const gapX = 130;
-        const gapY = 95;
-        for (let i = 0; i < cap; i++) {
-          const id = `S${(nowMs() + i).toString(36).toUpperCase()}`;
-          const x = 40 + (i % cols) * gapX;
-          const y = 40 + Math.floor(i / cols) * gapY;
-          const seatRef = doc(db, 'rooms', roomCode, 'seats', id);
-          await setDoc(seatRef, {
-            id,
-            x,
-            y,
-            restriction: 'A',
-            occupiedBy: null,
-            occupiedName: null,
-            occupiedGender: null,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+        if (room?.status && room.status !== 'lobby') {
+          return alertModal('자동 배치 불가', '대기중(lobby)일 때만 자동 배치를 사용할 수 있어요.');
         }
-        toast(setToastMsg, '자동 배치를 완료했어요.');
+        const ok = await confirmModal('자동 배치', `빈 칸에만 책상을 채웁니다.
+최대 6x5(30칸)까지 배치됩니다.`);
+        if (!ok) return;
+
+        const taken = new Set(
+          Object.values(seats || {}).map((s) => {
+            const col = Math.round(((s.x ?? GRID_MARGIN) - GRID_MARGIN) / CELL_W);
+            const row = Math.round(((s.y ?? GRID_MARGIN) - GRID_MARGIN) / CELL_H);
+            return `${row},${col}`;
+          })
+        );
+
+        const cap = room?.capacity ?? clamp(Number(capacity || 0), 1, 60);
+        const maxCells = GRID_COLS * GRID_ROWS;
+        const target = Math.min(cap, maxCells);
+
+        let created = 0;
+        for (let r = 0; r < GRID_ROWS; r++) {
+          for (let c = 0; c < GRID_COLS; c++) {
+            if (created >= target) break;
+            const key = `${r},${c}`;
+            if (taken.has(key)) continue;
+
+            const id = `S${(nowMs() + created).toString(36).toUpperCase()}`;
+            const seatRef = doc(db, 'rooms', roomCode, 'seats', id);
+            await setDoc(seatRef, {
+              id,
+              x: GRID_MARGIN + c * CELL_W,
+              y: GRID_MARGIN + r * CELL_H,
+              restriction: 'A',
+              occupiedBy: null,
+              occupiedName: null,
+              occupiedGender: null,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            taken.add(key);
+            created++;
+          }
+          if (created >= target) break;
+        }
+
+        toast(setToastMsg, `자동 배치를 완료했어요. (+${created}개)`);
       };
 
       const updateSeat = async (seatId, patch) => {
@@ -915,8 +991,8 @@
               <div>
                 <label className="text-sm font-bold">교실 코드</label>
                 <input
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(normalizeRoomCode(e.target.value))}
+                  value={joinRoomCode}
+                  onChange={(e) => setJoinRoomCode(normalizeRoomCode(e.target.value))}
                   placeholder="예: 6A1"
                   className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
                 />
@@ -952,7 +1028,7 @@
 
             <div className="mt-5 flex gap-3">
               <button
-                onClick={() => ensureStudentDoc(roomCode, studentName, studentGender)}
+                onClick={() => ensureStudentDoc(joinRoomCode, studentName, studentGender)}
                 className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
               >
                 입장하기
