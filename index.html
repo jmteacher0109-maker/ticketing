@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>자리 티켓팅 프로그램 v2</title>
 
+  <link rel="icon" href="data:," />
+
   <!-- Tailwind (프로토타입) -->
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -351,6 +353,8 @@
 
       const [toastMsg, setToastMsg] = React.useState(null);
       const [modal, setModal] = React.useState(null);
+
+      const [selectedSeatId, setSelectedSeatId] = React.useState(null);
 
       // student profile
       const [studentName, setStudentName] = React.useState('');
@@ -773,6 +777,13 @@
         return () => interval && clearInterval(interval);
       }, [room?.status, room?.countdownStartedAt, room?.countdownSeconds, isAdmin]);
 
+      // If user manually created room then navigated, ensure correct screen
+      React.useEffect(() => {
+        if (!roomCode) return;
+        if (role === 'admin' && screen !== 'adminRoom') setScreen('adminRoom');
+        if (role === 'student' && screen !== 'studentRoom') setScreen('studentRoom');
+      }, [roomCode, role, screen]);
+
       /*******************************************************
        * UI
        *******************************************************/
@@ -1178,7 +1189,6 @@
         );
       };
 
-      const [selectedSeatId, setSelectedSeatId] = React.useState(null);
 
       const StudentRoom = () => {
         if (roomLoading) {
@@ -1287,12 +1297,6 @@
       else if (screen === 'adminRoom') body = <AdminRoom />;
       else if (screen === 'studentRoom') body = <StudentRoom />;
 
-      // If user manually created room then navigated, ensure correct screen
-      React.useEffect(() => {
-        if (!roomCode) return;
-        if (role === 'admin' && screen !== 'adminRoom') setScreen('adminRoom');
-        if (role === 'student' && screen !== 'studentRoom') setScreen('studentRoom');
-      }, [roomCode, role]);
 
       return (
         <div className="min-h-screen">
