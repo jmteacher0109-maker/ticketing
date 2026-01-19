@@ -110,6 +110,13 @@
     const CELL_H = 95;
     const GRID_MARGIN = 24;
 
+    // 책상(좌석) 크기
+    const SEAT_W = 96;
+    const SEAT_H = 64;
+    const SEAT_W_COMPACT = 78;
+    const SEAT_H_COMPACT = 54;
+
+
     const normalizeRoomCode = (s) => (s || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
     const isValidRoomCode = (s) => /^[A-Z0-9]{3,12}$/.test(s);
 
@@ -223,7 +230,7 @@
             occupied ? 'opacity-95' : 'opacity-100',
             isSelected ? 'ring-amber-400 shadow-md scale-[1.02]' : `ring-transparent hover:ring-2 ${meta.ring}`,
           ].join(' ')}
-          style={{ left: seat.x ?? 20, top: seat.y ?? 20, width: compact ? 84 : 110, height: compact ? 64 : 78 }}
+          style={{ left: seat.x ?? 20, top: seat.y ?? 20, width: compact ? SEAT_W_COMPACT : SEAT_W, height: compact ? SEAT_H_COMPACT : SEAT_H }}
           onClick={(e) => {
             e.stopPropagation();
             onSelect?.(seat.id);
@@ -273,14 +280,16 @@
         const { seatId, startX, startY, origX, origY } = dragRef.current;
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
-        // 드래그는 표 칸 기준으로 스냅(이동)
+        // 6x5 그리드 안에서 자유 이동(경계만 제한)
         const rawX = origX + dx;
         const rawY = origY + dy;
-        const col = clamp(Math.round((rawX - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
-        const row = clamp(Math.round((rawY - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
-        const snapX = GRID_MARGIN + col * CELL_W;
-        const snapY = GRID_MARGIN + row * CELL_H;
-        setGhostPos({ seatId, x: snapX, y: snapY });
+        const minX = GRID_MARGIN;
+        const minY = GRID_MARGIN;
+        const maxX = GRID_MARGIN + GRID_COLS * CELL_W - SEAT_W;
+        const maxY = GRID_MARGIN + GRID_ROWS * CELL_H - SEAT_H;
+        const x = clamp(rawX, minX, maxX);
+        const y = clamp(rawY, minY, maxY);
+        setGhostPos({ seatId, x, y });
       }, []);
 
       const endDrag = React.useCallback(async () => {
@@ -337,7 +346,7 @@
           <div className="px-4 py-3 border-b border-stone-200 flex items-center justify-between">
             <div className="font-black">교실</div>
             <div className="text-xs text-stone-600">
-              {editable ? '드래그로 책상 이동 / 클릭으로 선택' : '책상을 클릭해 선택'}
+              {editable ? '드래그로 책상 이동(자유 이동) / 클릭으로 선택' : '책상을 클릭해 선택'}
             </div>
           </div>
           <div
@@ -389,7 +398,6 @@
 
       // admin setup
       const [adminRoomCode, setAdminRoomCode] = React.useState('');
-      const [capacity, setCapacity] = React.useState(24);
 
       // room data
       const { room, seats, students, loading: roomLoading } = useRoomData(roomCode);
@@ -401,6 +409,28 @@
 
       const joinedCount = React.useMemo(() => Object.keys(students || {}).length, [students]);
       const seatCount = React.useMemo(() => Object.keys(seats || {}).length, [seats]);
+
+      // 방 정원(capacity)을 '배치한 책상 개수'로 자동 동기화 (관리자 + 대기중일 때만)
+      const capSyncRef = React.useRef(null);
+      React.useEffect(() => {
+        if (!room || !isAdmin) return;
+        if (room.status !== 'lobby') return;
+        const desired = seatCount;
+        if ((room.capacity ?? 0) === desired) return;
+        if (capSyncRef.current) clearTimeout(capSyncRef.current);
+        capSyncRef.current = setTimeout(async () => {
+          try {
+            const roomRef = doc(db, 'rooms', roomCode);
+            await updateDoc(roomRef, { capacity: desired, updatedAt: serverTimestamp() });
+          } catch (e) {
+            console.warn('capacity sync failed', e);
+          }
+        }, 350);
+        return () => {
+          if (capSyncRef.current) clearTimeout(capSyncRef.current);
+        };
+      }, [room?.status, room?.capacity, seatCount, isAdmin, roomCode]);
+
 
       const mySeatId = React.useMemo(() => {
         if (!user) return null;
@@ -446,7 +476,6 @@
         if (!isValidRoomCode(code)) {
           return alertModal('교실 코드', '교실 코드는 영문 대문자/숫자 3~12자로 입력해주세요.');
         }
-        const cap = clamp(Number(capacity || 0), 1, 60);
         const roomRef = doc(db, 'rooms', code);
         const snap = await getDoc(roomRef);
         if (snap.exists()) {
@@ -455,7 +484,7 @@
         await setDoc(roomRef, {
           code,
           adminUid: user.uid,
-          capacity: cap,
+          capacity: 0, // 책상 개수로 자동 업데이트
           status: 'lobby', // lobby | countdown | seating | ended
           countdownSeconds: 10,
           createdAt: serverTimestamp(),
@@ -515,8 +544,10 @@
         // 현재 사용 중인 칸(6x5) 체크
         const taken = new Set(
           Object.values(seats || {}).map((s) => {
-            const col = Math.round(((s.x ?? GRID_MARGIN) - GRID_MARGIN) / CELL_W);
-            const row = Math.round(((s.y ?? GRID_MARGIN) - GRID_MARGIN) / CELL_H);
+            const cx = (s.x ?? GRID_MARGIN) + SEAT_W / 2;
+            const cy = (s.y ?? GRID_MARGIN) + SEAT_H / 2;
+            const col = clamp(Math.floor((cx - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
+            const row = clamp(Math.floor((cy - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
             return `${row},${col}`;
           })
         );
@@ -557,21 +588,20 @@
         if (room?.status && room.status !== 'lobby') {
           return alertModal('자동 배치 불가', '대기중(lobby)일 때만 자동 배치를 사용할 수 있어요.');
         }
-        const ok = await confirmModal('자동 배치', `빈 칸에만 책상을 채웁니다.
+        const ok = await confirmModal('자동 배치', `빈 칸에 책상을 채웁니다.
 최대 6x5(30칸)까지 배치됩니다.`);
         if (!ok) return;
 
         const taken = new Set(
           Object.values(seats || {}).map((s) => {
-            const col = Math.round(((s.x ?? GRID_MARGIN) - GRID_MARGIN) / CELL_W);
-            const row = Math.round(((s.y ?? GRID_MARGIN) - GRID_MARGIN) / CELL_H);
+            const cx = (s.x ?? GRID_MARGIN) + SEAT_W / 2;
+            const cy = (s.y ?? GRID_MARGIN) + SEAT_H / 2;
+            const col = clamp(Math.floor((cx - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
+            const row = clamp(Math.floor((cy - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
             return `${row},${col}`;
           })
         );
-
-        const cap = room?.capacity ?? clamp(Number(capacity || 0), 1, 60);
-        const maxCells = GRID_COLS * GRID_ROWS;
-        const target = Math.min(cap, maxCells);
+        const target = GRID_COLS * GRID_ROWS;
 
         let created = 0;
         for (let r = 0; r < GRID_ROWS; r++) {
@@ -629,13 +659,14 @@
       const startTicketing = async () => {
         if (!isAdmin) return;
         if (!room) return;
-        if (joinedCount !== room.capacity) {
-          return alertModal('인원 미달', `현재 ${joinedCount}명 입장 / 정원 ${room.capacity}명 입니다.\n정원과 동일해지면 시작할 수 있어요.`);
+        if (seatCount <= 0) {
+          return alertModal('책상 없음', '먼저 책상을 1개 이상 배치해주세요.');
         }
-        if (seatCount < room.capacity) {
-          const ok = await confirmModal('책상 부족', `현재 책상 ${seatCount}개 / 정원 ${room.capacity}명 입니다.\n그래도 시작할까요?`);
-          if (!ok) return;
+        if (joinedCount !== seatCount) {
+          return alertModal('인원 미달', `현재 ${joinedCount}명 입장 / 책상 ${seatCount}개 입니다.
+입장 인원과 책상 개수가 같아지면 시작할 수 있어요.`);
         }
+        // seatCount와 joinedCount가 같을 때만 시작하도록 변경(추가 확인 불필요)
         const roomRef = doc(db, 'rooms', roomCode);
         await updateDoc(roomRef, {
           status: 'countdown',
@@ -854,13 +885,6 @@
         return () => interval && clearInterval(interval);
       }, [room?.status, room?.countdownStartedAt, room?.countdownSeconds, isAdmin]);
 
-      // If user manually created room then navigated, ensure correct screen
-      React.useEffect(() => {
-        if (!roomCode) return;
-        if (role === 'admin' && screen !== 'adminRoom') setScreen('adminRoom');
-        if (role === 'student' && screen !== 'studentRoom') setScreen('studentRoom');
-      }, [roomCode, role, screen]);
-
       /*******************************************************
        * UI
        *******************************************************/
@@ -906,14 +930,14 @@
             <div className="grid md:grid-cols-2 gap-4">
               <button
                 className="p-5 rounded-2xl border-2 border-sky-200 bg-sky-50 hover:bg-sky-100 text-left"
-                onClick={() => { setRole('admin'); setScreen('adminCreate'); }}
+                onClick={() => { setRole('admin'); setRoomCode(''); setJoinRoomCode(''); setStudentName(''); setAdminRoomCode(''); setScreen('adminCreate'); }}
               >
                 <div className="text-lg font-black">관리자</div>
                 <div className="text-sm text-stone-700 mt-1">교실 생성 · 자리 배치 · 티켓팅 시작/종료 · 학생 자리 조정</div>
               </button>
               <button
                 className="p-5 rounded-2xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-left"
-                onClick={() => { setRole('student'); setScreen('studentJoin'); }}
+                onClick={() => { setRole('student'); setRoomCode(''); setJoinRoomCode(''); setStudentName(''); setAdminRoomCode(''); setScreen('studentJoin'); }}
               >
                 <div className="text-lg font-black">학생</div>
                 <div className="text-sm text-stone-700 mt-1">교실 코드로 입장 · 이름/성별 입력 · 티켓팅 시간에 자리 선택</div>
@@ -940,25 +964,17 @@
                 <label className="text-sm font-bold">교실 코드</label>
                 <input
                   value={adminRoomCode}
-                  onChange={(e) => setAdminRoomCode(normalizeRoomCode(e.target.value))}
+                  onChange={(e) => setAdminRoomCode(e.target.value)}
+                  onBlur={() => setAdminRoomCode(normalizeRoomCode(adminRoomCode))}
                   placeholder="예: 6A1"
                   className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-sky-300 font-mono"
                 />
                 <div className="text-xs text-stone-500 mt-2">영문 대문자/숫자 3~12자 (공백/특수문자 자동 제거)</div>
               </div>
-              <div>
-                <label className="text-sm font-bold">인원 수</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={capacity}
-                  onChange={(e) => setCapacity(e.target.value)}
-                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                />
-                <div className="text-xs text-stone-500 mt-2">정원과 동일하게 학생이 입장하면 티켓팅 시작이 활성화됩니다.</div>
-              </div>
             </div>
+
+            <div className="mt-4 text-xs text-stone-500">* 인원 수(정원)는 "배치한 책상 개수"로 자동 결정됩니다.</div>
+          </Card>
 
             <div className="mt-5 flex gap-3">
               <button
@@ -992,7 +1008,8 @@
                 <label className="text-sm font-bold">교실 코드</label>
                 <input
                   value={joinRoomCode}
-                  onChange={(e) => setJoinRoomCode(normalizeRoomCode(e.target.value))}
+                  onChange={(e) => setJoinRoomCode(e.target.value)}
+                  onBlur={() => setJoinRoomCode(normalizeRoomCode(joinRoomCode))}
                   placeholder="예: 6A1"
                   className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
                 />
@@ -1115,10 +1132,10 @@
                 <div className="mt-4 grid md:grid-cols-2 gap-4">
                   <Card
                     title="티켓팅"
-                    right={<div className="text-xs text-stone-600">정원 {room.capacity}명</div>}
+                    right={<div className="text-xs text-stone-600">정원 {seatCount}명</div>}
                   >
                     <div className="text-sm text-stone-700">
-                      입장: <span className="font-black">{joinedCount}</span> / {room.capacity}명
+                      입장: <span className="font-black">{joinedCount}</span> / {seatCount}명
                       <span className="mx-2">·</span>
                       책상: <span className="font-black">{seatCount}</span>개
                     </div>
@@ -1310,7 +1327,7 @@
             {room.status === 'lobby' && (
               <Card title="대기 중">
                 <div className="text-stone-700">관리자가 티켓팅 시작 버튼을 누를 때까지 기다려주세요.</div>
-                <div className="mt-2 text-sm text-stone-600">입장 인원: {joinedCount} / {room.capacity}명</div>
+                <div className="mt-2 text-sm text-stone-600">입장 인원: {joinedCount} / {seatCount}명</div>
               </Card>
             )}
 
@@ -1357,7 +1374,7 @@
                   </Card>
 
                   <Card title="현재 입장 인원">
-                    <div className="text-sm text-stone-700">{joinedCount} / {room.capacity}명</div>
+                    <div className="text-sm text-stone-700">{joinedCount} / {seatCount}명</div>
                   </Card>
                 </div>
               </div>
