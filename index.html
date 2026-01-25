@@ -13,7 +13,6 @@
   <!-- React -->
   <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-  <script>console.log("React version:", window.React?.version, "ReactDOM:", window.ReactDOM?.version || "(no version)");</script>
 
   <!-- Babel (프로토타입) -->
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js"></script>
@@ -27,6 +26,7 @@
     .no-select { user-select: none; -webkit-user-select: none; }
   </style>
 </head>
+
 <body class="bg-stone-100 text-stone-900">
   <div id="root"></div>
 
@@ -53,12 +53,10 @@
       signInWithCustomToken,
     } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-    // 미리보기 환경 지원 + 외부 배포 지원
     let firebaseConfig;
     if (typeof window.__firebase_config !== 'undefined') {
       firebaseConfig = JSON.parse(window.__firebase_config);
     } else {
-      // TODO: 외부로 가져갈 때는 여기 config를 본인 Firebase로 바꾸세요.
       firebaseConfig = {
         apiKey: "AIzaSyCTcI5JULAsWKUbcFWyWwK7ycqSebv65YE",
         authDomain: "seat-chagne.firebaseapp.com",
@@ -73,7 +71,6 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // Babel(텍스트/바벨 스크립트)에서 접근할 수 있도록 전역 노출
     window.__FB = {
       auth, db,
       doc, collection, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot,
@@ -86,16 +83,12 @@
     /*******************************************************
      * Firebase
      *******************************************************/
-    // Firebase 모듈은 아래 <script type="module">에서 로드되어 window.__FB 로 노출됩니다.
     const {
       auth, db,
-      // Firestore
       doc, collection, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot,
       serverTimestamp, runTransaction, query, orderBy,
-      // Auth
       signInAnonymously, onAuthStateChanged, signInWithCustomToken
     } = window.__FB;
-
 
     /*******************************************************
      * 작은 유틸
@@ -106,24 +99,21 @@
     // 6x5 고정 표(그리드) 설정
     const GRID_COLS = 6;
     const GRID_ROWS = 5;
-    const CELL_W = 130;
-    const CELL_H = 95;
+    const CELL_W = 98;    // ✅ 가로 조금 축소
+    const CELL_H = 75;
     const GRID_MARGIN = 24;
 
-    // 책상(좌석) 크기
-    const SEAT_W = 96;
-    const SEAT_H = 64;
-    const SEAT_W_COMPACT = 78;
-    const SEAT_H_COMPACT = 54;
-
+    // 책상(좌석) 크기(표시용)
+    const SEAT_W = 92;
+    const SEAT_H = 74;
 
     const normalizeRoomCode = (s) => (s || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
     const isValidRoomCode = (s) => /^[A-Z0-9]{3,12}$/.test(s);
 
     const restrictionMeta = {
-      A: { label: "공용", pill: "bg-stone-200 text-stone-700", seat: "bg-stone-200", ring: "ring-stone-300" },
-      M: { label: "남", pill: "bg-sky-200 text-sky-800", seat: "bg-sky-200", ring: "ring-sky-300" },
-      F: { label: "여", pill: "bg-pink-200 text-pink-800", seat: "bg-pink-200", ring: "ring-pink-300" },
+      A: { label: "공용", pill: "bg-stone-200 text-stone-700", seat: "bg-[#FFF2B2]", ring: "ring-stone-300" },
+      M: { label: "남", pill: "bg-sky-200 text-sky-800", seat: "bg-[#CFEFFF]", ring: "ring-sky-300" },
+      F: { label: "여", pill: "bg-pink-200 text-pink-800", seat: "bg-[#FFD7E8]", ring: "ring-pink-300" },
     };
 
     const genderLabel = (g) => (g === 'M' ? '남' : g === 'F' ? '여' : '미정');
@@ -132,6 +122,27 @@
       setToast(msg);
       setTimeout(() => setToast(null), 2200);
     };
+
+    // ✅ 좌표(x,y) -> (row,col)
+    const getCellFromXY = (x, y) => {
+      const cx = (x ?? GRID_MARGIN) + SEAT_W / 2;
+      const cy = (y ?? GRID_MARGIN) + SEAT_H / 2;
+      const col = clamp(Math.floor((cx - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
+      const row = clamp(Math.floor((cy - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
+      return { row, col };
+    };
+
+    // ✅ 표시 번호(1~30)
+    const seatDisplayNo = (seat) => {
+      const { row, col } = getCellFromXY(seat?.x, seat?.y);
+      return row * GRID_COLS + col + 1;
+    };
+    const seatDisplayText = (seat) => `${seatDisplayNo(seat)}번`;
+
+    const xyFromCell = (row, col) => ({
+      x: GRID_MARGIN + col * CELL_W,
+      y: GRID_MARGIN + row * CELL_H,
+    });
 
     /*******************************************************
      * Modal
@@ -168,33 +179,44 @@
      *******************************************************/
     function useRoomData(roomCode) {
       const [room, setRoom] = React.useState(null);
-      const [seats, setSeats] = React.useState({}); // id -> data
-      const [students, setStudents] = React.useState({}); // uid -> data
+      const [seats, setSeats] = React.useState({});
+      const [students, setStudents] = React.useState({});
       const [loading, setLoading] = React.useState(true);
 
       React.useEffect(() => {
         if (!roomCode) return;
         setLoading(true);
+
         const roomRef = doc(db, 'rooms', roomCode);
         const seatsRef = collection(db, 'rooms', roomCode, 'seats');
         const studentsRef = collection(db, 'rooms', roomCode, 'students');
 
-        const unsubRoom = onSnapshot(roomRef, (snap) => {
-          setRoom(snap.exists() ? { id: snap.id, ...snap.data() } : null);
-        });
+        const unsubRoom = onSnapshot(
+          roomRef,
+          (snap) => setRoom(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+          (err) => { console.error("room snapshot error", err); setRoom(null); setLoading(false); }
+        );
 
-        const unsubSeats = onSnapshot(query(seatsRef, orderBy('createdAt', 'asc')), (snap) => {
-          const m = {};
-          snap.forEach((d) => (m[d.id] = { id: d.id, ...d.data() }));
-          setSeats(m);
-        });
+        const unsubSeats = onSnapshot(
+          query(seatsRef, orderBy('createdAt', 'asc')),
+          (snap) => {
+            const m = {};
+            snap.forEach((d) => (m[d.id] = { id: d.id, ...d.data() }));
+            setSeats(m);
+          },
+          (err) => { console.error("seats snapshot error", err); setSeats({}); setLoading(false); }
+        );
 
-        const unsubStudents = onSnapshot(query(studentsRef, orderBy('joinedAt', 'asc')), (snap) => {
-          const m = {};
-          snap.forEach((d) => (m[d.id] = { id: d.id, ...d.data() }));
-          setStudents(m);
-          setLoading(false);
-        }, () => setLoading(false));
+        const unsubStudents = onSnapshot(
+          query(studentsRef, orderBy('joinedAt', 'asc')),
+          (snap) => {
+            const m = {};
+            snap.forEach((d) => (m[d.id] = { id: d.id, ...d.data() }));
+            setStudents(m);
+            setLoading(false);
+          },
+          (err) => { console.error("students snapshot error", err); setLoading(false); }
+        );
 
         return () => {
           unsubRoom();
@@ -207,168 +229,363 @@
     }
 
     /*******************************************************
-     * Seat Canvas (공통)
+     * UI 컴포넌트
      *******************************************************/
-    const Seat = React.memo(function Seat({
+    function Card({ title, children, right }) {
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
+            <div className="font-black">{title}</div>
+            {right}
+          </div>
+          <div className="p-5">{children}</div>
+        </div>
+      );
+    }
+
+    // ✅ 문(door) 장식
+    function Door({ position = "top" }) {
+      return (
+        <div
+          className={[
+            "absolute",
+            position === "top" ? "top-8" : "bottom-8",
+            "right-6",
+            "w-[44px] h-[86px] rounded-xl",
+            "bg-[#C89B7B] shadow-md border-2 border-[#B98A6B]",
+            "flex items-center justify-center"
+          ].join(" ")}
+          title="문"
+        >
+          <div className="w-[34px] h-[72px] rounded-lg bg-[#E2B695] border border-[#B98A6B] relative">
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#6B4B3A]"></div>
+          </div>
+        </div>
+      );
+    }
+
+    // ✅ 좌석(학생 친화 스타일)
+    const SeatTile = React.memo(function SeatTile({
       seat,
       isAdmin,
       isSelected,
-      onSelect,
+      isPending,
       onClick,
-      onPointerDown,
-      compact = false,
     }) {
       const meta = restrictionMeta[seat.restriction || 'A'] || restrictionMeta.A;
       const occupied = !!seat.occupiedBy;
       const name = seat.occupiedName || '';
 
+      const ringCls = isPending
+        ? "ring-4 ring-emerald-500 scale-[1.03]"
+        : isSelected
+          ? "ring-4 ring-emerald-400 scale-[1.03]"
+          : "ring-2 ring-transparent hover:ring-2 hover:ring-stone-300";
+
       return (
-        <div
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onClick?.(); }}
           className={[
-            'absolute rounded-xl shadow-sm ring-2 transition-all no-select',
+            "no-select",
+            "w-[92px] h-[74px]",
+            "rounded-2xl",
+            "shadow-sm",
+            "transition-all",
+            "flex flex-col items-center justify-center",
             meta.seat,
-            occupied ? 'opacity-95' : 'opacity-100',
-            isSelected ? 'ring-amber-400 shadow-md scale-[1.02]' : `ring-transparent hover:ring-2 ${meta.ring}`,
-          ].join(' ')}
-          style={{ left: seat.x ?? 20, top: seat.y ?? 20, width: compact ? SEAT_W_COMPACT : SEAT_W, height: compact ? SEAT_H_COMPACT : SEAT_H }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect?.(seat.id);
-            onClick?.(seat.id);
-          }}
-          onPointerDown={(e) => {
-            if (!isAdmin) return;
-            e.stopPropagation();
-            onSelect?.(seat.id);
-            onPointerDown?.(e, seat.id);
-          }}
+            ringCls,
+          ].join(" ")}
         >
-          <div className="flex items-center justify-between px-3 pt-2">
-            <span className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${meta.pill}`}>{meta.label}</span>
-            <span className="text-[11px] text-stone-600 font-bold">{seat.id}</span>
+          <div className="text-[11px] font-black text-stone-700">
+            {seatDisplayText(seat)}
           </div>
-          <div className="px-3 pt-1">
-            <div className={`text-sm font-black ${occupied ? 'text-stone-900' : 'text-stone-500'}`}>
-              {occupied ? name : '빈자리'}
-            </div>
-            {occupied && (
-              <div className="text-xs text-stone-700 font-bold">{genderLabel(seat.occupiedGender)}</div>
-            )}
+          <div className={["mt-1 text-[12px] font-black", occupied ? "text-stone-900" : "text-amber-700"].join(" ")}>
+            {occupied ? name : "빈자리"}
           </div>
-        </div>
+          {occupied && (
+            <div className="text-[11px] font-bold text-stone-600">{genderLabel(seat.occupiedGender)}</div>
+          )}
+        </button>
       );
     });
 
+    /*******************************************************
+     * 학생 친화 교실 UI + 좌석 그리드
+     *******************************************************/
     function SeatCanvas({
       isAdmin,
       seats,
       selectedSeatId,
       setSelectedSeatId,
-      onSeatClick,
-      onSeatDragCommit,
+      onSeatClick,          // (seatId) => Promise<boolean|void>
+      onSeatSwap,           // (aId, bId) => Promise<void>
+      onSeatMoveToCell,     // (seatId, pos) => Promise<void>
       editable,
-      height = 520,
+      height = 560,
     }) {
-      const containerRef = React.useRef(null);
-      const dragRef = React.useRef(null); // { seatId, startX, startY, origX, origY }
-      const [ghostPos, setGhostPos] = React.useState(null); // { seatId, x, y }
+      // 관리자 클릭 이동용 상태
+      const [pendingMoveSeatId, setPendingMoveSeatId] = React.useState(null);
 
       const seatList = React.useMemo(() => Object.values(seats || {}), [seats]);
 
-      const onPointerMove = React.useCallback((e) => {
-        if (!dragRef.current) return;
-        const { seatId, startX, startY, origX, origY } = dragRef.current;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        // 6x5 그리드 안에서 자유 이동(경계만 제한)
-        const rawX = origX + dx;
-        const rawY = origY + dy;
-        const minX = GRID_MARGIN;
-        const minY = GRID_MARGIN;
-        const maxX = GRID_MARGIN + GRID_COLS * CELL_W - SEAT_W;
-        const maxY = GRID_MARGIN + GRID_ROWS * CELL_H - SEAT_H;
-        const x = clamp(rawX, minX, maxX);
-        const y = clamp(rawY, minY, maxY);
-        setGhostPos({ seatId, x, y });
-      }, []);
-
-      const endDrag = React.useCallback(async () => {
-        const d = dragRef.current;
-        if (!d) return;
-        dragRef.current = null;
-        if (ghostPos && ghostPos.seatId === d.seatId) {
-          const x = Math.round(ghostPos.x);
-          const y = Math.round(ghostPos.y);
-          setGhostPos(null);
-          await onSeatDragCommit?.(d.seatId, { x, y });
-        } else {
-          setGhostPos(null);
+      // cellKey -> seat
+      const seatByCell = React.useMemo(() => {
+        const m = new Map();
+        for (const s of seatList) {
+          const { row, col } = getCellFromXY(s.x, s.y);
+          m.set(`${row},${col}`, s);
         }
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', endDrag);
-        window.removeEventListener('pointercancel', endDrag);
-      }, [ghostPos, onSeatDragCommit, onPointerMove]);
+        return m;
+      }, [seatList]);
 
-      const onSeatPointerDown = React.useCallback((e, seatId) => {
-        if (!editable) return;
-        const s = seats?.[seatId];
-        if (!s) return;
-        dragRef.current = {
-          seatId,
-          startX: e.clientX,
-          startY: e.clientY,
-          origX: s.x ?? 20,
-          origY: s.y ?? 20,
-        };
-        window.addEventListener('pointermove', onPointerMove);
-        window.addEventListener('pointerup', endDrag);
-        window.addEventListener('pointercancel', endDrag);
-      }, [editable, seats, onPointerMove, endDrag]);
+      const seatIdAtCell = React.useCallback((row, col) => {
+        const s = seatByCell.get(`${row},${col}`);
+        return s?.id ?? null;
+      }, [seatByCell]);
 
-      const renderSeat = (seat) => {
-        const isSelected = seat.id === selectedSeatId;
-        const pos = ghostPos && ghostPos.seatId === seat.id ? ghostPos : seat;
-        return (
-          <Seat
-            key={seat.id}
-            seat={{ ...seat, x: pos.x, y: pos.y }}
-            isAdmin={isAdmin}
-            isSelected={isSelected}
-            onSelect={setSelectedSeatId}
-            onClick={onSeatClick}
-            onPointerDown={onSeatPointerDown}
-          />
-        );
+      const handleCellClick = React.useCallback(async (row, col) => {
+        // 학생/편집불가면: 선택 해제만
+        if (!editable || !isAdmin) {
+          setSelectedSeatId(null);
+          return;
+        }
+
+        // 이동 대기중이면: 스왑 or 빈칸 이동
+        if (pendingMoveSeatId) {
+          const targetSeatId = seatIdAtCell(row, col);
+
+          if (targetSeatId && targetSeatId !== pendingMoveSeatId) {
+            await onSeatSwap?.(pendingMoveSeatId, targetSeatId);
+          } else {
+            const pos = xyFromCell(row, col);
+            await onSeatMoveToCell?.(pendingMoveSeatId, pos);
+          }
+
+          setPendingMoveSeatId(null);
+          return;
+        }
+
+        // 이동대기 없으면: 선택 해제
+        setSelectedSeatId(null);
+      }, [editable, isAdmin, pendingMoveSeatId, seatIdAtCell, onSeatSwap, onSeatMoveToCell, setSelectedSeatId]);
+
+      const handleSeatClick = React.useCallback(async (seatId) => {
+        // 관리자 + 편집 가능일 때: 배정모드 우선 처리 → 아니면 이동대기 토글
+        if (isAdmin && editable) {
+          const handled = await onSeatClick?.(seatId);
+          if (handled) return;
+
+          setPendingMoveSeatId((cur) => (cur === seatId ? null : seatId));
+          setSelectedSeatId(seatId);
+          return;
+        }
+
+        // 학생/일반 클릭
+        setSelectedSeatId(seatId);
+        await onSeatClick?.(seatId);
+      }, [isAdmin, editable, onSeatClick, setSelectedSeatId]);
+
+      const gridStyle = {
+        gridTemplateColumns: `repeat(${GRID_COLS}, ${CELL_W}px)`,
+        gridTemplateRows: `repeat(${GRID_ROWS}, ${CELL_H}px)`,
+        gap: "8px",
       };
 
       return (
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-stone-200 flex items-center justify-between">
-            <div className="font-black">교실</div>
-            <div className="text-xs text-stone-600">
-              {editable ? '드래그로 책상 이동(자유 이동) / 클릭으로 선택' : '책상을 클릭해 선택'}
+        <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
+          {/* ✅ 칠판 */}
+          <div className="bg-[#1F4D34] text-white px-6 py-6">
+            <div className="max-w-5xl mx-auto text-center">
+              <div className="tracking-[0.3em] text-2xl font-black">CHALK BOARD</div>
+              <div className="mt-2 text-sm text-white/80 font-bold">원하는 자리를 선택하세요</div>
             </div>
           </div>
-          <div
-            ref={containerRef}
-            className="relative overflow-auto bg-stone-50"
-            style={{ height }}
-            onClick={() => setSelectedSeatId(null)}
-          >
-            {/* Canvas area */}
-            <div
-                className="relative"
-                style={{
-                  width: GRID_MARGIN * 2 + GRID_COLS * CELL_W,
-                  height: GRID_MARGIN * 2 + GRID_ROWS * CELL_H,
-                  backgroundImage: `linear-gradient(to right, rgba(120,120,120,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(120,120,120,0.12) 1px, transparent 1px)`,
-                  backgroundSize: `${CELL_W}px ${CELL_H}px`,
-                  backgroundPosition: `${GRID_MARGIN}px ${GRID_MARGIN}px`,
-                }}
+
+          <div className="bg-gradient-to-b from-[#f5f1ea] to-[#efe7dc] px-4 py-6">
+            {/* ✅ 교탁 */}
+            <div className="max-w-5xl mx-auto flex justify-center">
+              <div className="w-[220px] h-[46px] rounded-b-2xl bg-[#8B6B5D] shadow-md flex items-center justify-center text-white font-black tracking-widest">
+                TEACHER
+              </div>
+            </div>
+
+            {/* ✅ 교실 프레임(가운데 정렬) */}
+            <div className="max-w-5xl mx-auto mt-5">
+              <div className="relative rounded-[36px] bg-white/90 shadow-lg border border-white p-6 md:p-8">
+                {/* ✅ 오른쪽 위/아래 문 */}
+                <Door position="top" />
+                <Door position="bottom" />
+
+                {/* 안내 */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="font-black text-stone-700">교실</div>
+                  <div className="text-xs text-stone-500 font-bold">
+                    {editable && isAdmin
+                      ? (pendingMoveSeatId
+                        ? '✅ 책상 선택됨 → 빈 칸(또는 다른 책상)을 클릭하면 이동/스왑'
+                        : '✅ 책상을 클릭해 선택 → 원하는 칸(또는 다른 책상)을 클릭')
+                      : '책상을 클릭해 선택'}
+                  </div>
+                </div>
+
+                {/* ✅ 그리드(가운데 배치) */}
+                <div
+                  className="w-full overflow-auto"
+                  style={{ height }}
+                >
+                  <div className="w-full flex justify-center">
+                    <div className="relative">
+                      <div className="grid" style={gridStyle}>
+                        {Array.from({ length: GRID_ROWS }).map((_, r) =>
+                          Array.from({ length: GRID_COLS }).map((__, c) => {
+                            const seat = seatByCell.get(`${r},${c}`) || null;
+
+                            return (
+                              <div
+                                key={`${r},${c}`}
+                                className="flex items-center justify-center"
+                                onClick={() => handleCellClick(r, c)}
+                              >
+                                {seat ? (
+                                  <SeatTile
+                                    seat={seat}
+                                    isAdmin={isAdmin}
+                                    isSelected={seat.id === selectedSeatId}
+                                    isPending={seat.id === pendingMoveSeatId}
+                                    onClick={() => handleSeatClick(seat.id)}
+                                  />
+                                ) : (
+                                  // 빈 칸(관리자 편집일 때 이동 클릭 타겟)
+                                  <div
+                                    className={[
+                                      "w-[92px] h-[74px] rounded-2xl",
+                                      "border-2 border-dashed",
+                                      editable && isAdmin ? "border-stone-300 hover:border-emerald-400 hover:bg-emerald-50/40 cursor-pointer" : "border-transparent",
+                                    ].join(" ")}
+                                    title={editable && isAdmin ? "여기로 이동" : ""}
+                                  />
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    /*******************************************************
+     * 뷰들
+     *******************************************************/
+    function AdminCreateView({ adminRoomCode, setAdminRoomCode, setScreen, createRoom, user }) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 pb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
+            <div className="text-lg font-black">관리자: 교실 생성</div>
+          </div>
+
+          <Card title="교실 정보">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-bold">교실 코드</label>
+                <input
+                  value={adminRoomCode}
+                  onChange={(e) => setAdminRoomCode(e.target.value)}
+                  placeholder="예: 6A1"
+                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-sky-300 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={createRoom}
+                disabled={!user}
+                className="px-5 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black"
               >
-              {seatList.map(renderSeat)}
+                교실 생성
+              </button>
+              <button
+                onClick={() => setScreen('home')}
+                className="px-5 py-3 rounded-xl bg-stone-200 hover:bg-stone-300 font-black"
+              >
+                취소
+              </button>
             </div>
+          </Card>
+        </div>
+      );
+    }
+
+    function StudentJoinView({
+      joinRoomCode, setJoinRoomCode,
+      studentName, setStudentName,
+      studentGender, setStudentGender,
+      ensureStudentDoc, setScreen
+    }) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 pb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
+            <div className="text-lg font-black">학생: 교실 입장</div>
           </div>
+
+          <Card title="입장 정보">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-bold">교실 코드</label>
+                <input
+                  value={joinRoomCode}
+                  onChange={(e) => setJoinRoomCode(e.target.value)}
+                  placeholder="예: 6A1"
+                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-bold">이름</label>
+                <input
+                  value={studentName}
+                  onChange={(e) => setStudentName(e.target.value)}
+                  placeholder="예: 김지민"
+                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-sm font-bold">성별</label>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => setStudentGender('M')}
+                  className={`px-4 py-2 rounded-xl font-black ${studentGender==='M'?'bg-sky-200':'bg-stone-200 hover:bg-stone-300'}`}
+                >남</button>
+                <button
+                  onClick={() => setStudentGender('F')}
+                  className={`px-4 py-2 rounded-xl font-black ${studentGender==='F'?'bg-pink-200':'bg-stone-200 hover:bg-stone-300'}`}
+                >여</button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => ensureStudentDoc(joinRoomCode, studentName, studentGender)}
+                className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
+              >
+                입장하기
+              </button>
+            </div>
+          </Card>
         </div>
       );
     }
@@ -384,22 +601,16 @@
       const [role, setRole] = React.useState(null); // 'admin' | 'student'
       const [roomCode, setRoomCode] = React.useState('');
 
-      // 학생 입장 화면에서 타이핑 중 roomCode가 바뀌며 화면이 튀는 문제를 막기 위한 별도 입력값
       const [joinRoomCode, setJoinRoomCode] = React.useState('');
-
       const [toastMsg, setToastMsg] = React.useState(null);
       const [modal, setModal] = React.useState(null);
-
       const [selectedSeatId, setSelectedSeatId] = React.useState(null);
 
-      // student profile
       const [studentName, setStudentName] = React.useState('');
       const [studentGender, setStudentGender] = React.useState('M');
 
-      // admin setup
       const [adminRoomCode, setAdminRoomCode] = React.useState('');
 
-      // room data
       const { room, seats, students, loading: roomLoading } = useRoomData(roomCode);
 
       const isAdmin = React.useMemo(() => {
@@ -410,7 +621,6 @@
       const joinedCount = React.useMemo(() => Object.keys(students || {}).length, [students]);
       const seatCount = React.useMemo(() => Object.keys(seats || {}).length, [seats]);
 
-      // 방 정원(capacity)을 '배치한 책상 개수'로 자동 동기화 (관리자 + 대기중일 때만)
       const capSyncRef = React.useRef(null);
       React.useEffect(() => {
         if (!room || !isAdmin) return;
@@ -426,11 +636,8 @@
             console.warn('capacity sync failed', e);
           }
         }, 350);
-        return () => {
-          if (capSyncRef.current) clearTimeout(capSyncRef.current);
-        };
+        return () => { if (capSyncRef.current) clearTimeout(capSyncRef.current); };
       }, [room?.status, room?.capacity, seatCount, isAdmin, roomCode]);
-
 
       const mySeatId = React.useMemo(() => {
         if (!user) return null;
@@ -473,32 +680,46 @@
        *******************************************************/
       const createRoom = async () => {
         const code = normalizeRoomCode(adminRoomCode);
+
         if (!isValidRoomCode(code)) {
           return alertModal('교실 코드', '교실 코드는 영문 대문자/숫자 3~12자로 입력해주세요.');
         }
-        const roomRef = doc(db, 'rooms', code);
-        const snap = await getDoc(roomRef);
-        if (snap.exists()) {
-          return alertModal('이미 존재', '이미 생성된 교실 코드입니다. 다른 코드를 사용하세요.');
-        }
-        await setDoc(roomRef, {
-          code,
-          adminUid: user.uid,
-          capacity: 0, // 책상 개수로 자동 업데이트
-          status: 'lobby', // lobby | countdown | seating | ended
-          countdownSeconds: 10,
-          createdAt: serverTimestamp(),
-        });
 
-        toast(setToastMsg, `교실 생성 완료: ${code}`);
-        setRoomCode(code);
-        setRole('admin');
-        setScreen('adminRoom');
+        try {
+          const roomRef = doc(db, 'rooms', code);
+          const snap = await getDoc(roomRef);
+          if (snap.exists()) {
+            return alertModal('이미 존재', '이미 생성된 교실 코드입니다. 다른 코드를 사용하세요.');
+          }
+
+          await setDoc(roomRef, {
+            code,
+            adminUid: user.uid,
+            capacity: 0,
+            status: 'lobby',
+            countdownSeconds: 10,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+
+          toast(setToastMsg, `교실 생성 완료: ${code}`);
+          setRoomCode(code);
+          setRole('admin');
+          setScreen('adminRoom');
+
+        } catch (e) {
+          console.error('createRoom failed:', e);
+          return alertModal(
+            '교실 생성 실패',
+            `에러: ${e?.code || e?.message || 'unknown'}\n\n(대부분 Firestore Rules 권한 문제입니다)`
+          );
+        }
       };
 
       const ensureStudentDoc = async (code, name, gender) => {
         const c = normalizeRoomCode(code);
         const n = (name || '').trim().slice(0, 12);
+
         if (!isValidRoomCode(c)) {
           await alertModal('교실 코드', '교실 코드는 영문 대문자/숫자 3~12자로 입력해주세요.');
           return false;
@@ -522,11 +743,7 @@
         const studentRef = doc(db, 'rooms', c, 'students', user.uid);
         const existing = await getDoc(studentRef);
         if (!existing.exists()) {
-          await setDoc(studentRef, {
-            name: n,
-            gender,
-            joinedAt: serverTimestamp(),
-          });
+          await setDoc(studentRef, { name: n, gender, joinedAt: serverTimestamp() }, { merge: true });
         }
 
         setRoomCode(c);
@@ -541,38 +758,32 @@
           return alertModal('추가 불가', '대기중(lobby)일 때만 책상을 추가할 수 있어요.');
         }
 
-        // 현재 사용 중인 칸(6x5) 체크
+        // 현재 사용 중인 칸 체크
         const taken = new Set(
           Object.values(seats || {}).map((s) => {
-            const cx = (s.x ?? GRID_MARGIN) + SEAT_W / 2;
-            const cy = (s.y ?? GRID_MARGIN) + SEAT_H / 2;
-            const col = clamp(Math.floor((cx - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
-            const row = clamp(Math.floor((cy - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
+            const { row, col } = getCellFromXY(s.x, s.y);
             return `${row},${col}`;
           })
         );
 
-        let found = null
+        let found = null;
         for (let r = 0; r < GRID_ROWS; r++) {
           for (let c = 0; c < GRID_COLS; c++) {
-            if (!taken.has(`${r},${c}`)) {
-              found = { r, c };
-              break;
-            }
+            if (!taken.has(`${r},${c}`)) { found = { r, c }; break; }
           }
           if (found) break;
         }
 
-        if (!found) {
-          return alertModal('추가 불가', '6x5 표(30칸)가 모두 찼습니다.');
-        }
+        if (!found) return alertModal('추가 불가', '6x5 표(30칸)가 모두 찼습니다.');
 
         const id = `S${nowMs().toString(36).toUpperCase()}`;
         const seatRef = doc(db, 'rooms', roomCode, 'seats', id);
+        const pos = xyFromCell(found.r, found.c);
+
         await setDoc(seatRef, {
           id,
-          x: GRID_MARGIN + found.c * CELL_W,
-          y: GRID_MARGIN + found.r * CELL_H,
+          x: pos.x,
+          y: pos.y,
           restriction: 'A',
           occupiedBy: null,
           occupiedName: null,
@@ -588,22 +799,19 @@
         if (room?.status && room.status !== 'lobby') {
           return alertModal('자동 배치 불가', '대기중(lobby)일 때만 자동 배치를 사용할 수 있어요.');
         }
-        const ok = await confirmModal('자동 배치', `빈 칸에 책상을 채웁니다.
-최대 6x5(30칸)까지 배치됩니다.`);
+        const ok = await confirmModal('자동 배치', `빈 칸에 책상을 채웁니다.\n최대 6x5(30칸)까지 배치됩니다.`);
         if (!ok) return;
 
         const taken = new Set(
           Object.values(seats || {}).map((s) => {
-            const cx = (s.x ?? GRID_MARGIN) + SEAT_W / 2;
-            const cy = (s.y ?? GRID_MARGIN) + SEAT_H / 2;
-            const col = clamp(Math.floor((cx - GRID_MARGIN) / CELL_W), 0, GRID_COLS - 1);
-            const row = clamp(Math.floor((cy - GRID_MARGIN) / CELL_H), 0, GRID_ROWS - 1);
+            const { row, col } = getCellFromXY(s.x, s.y);
             return `${row},${col}`;
           })
         );
-        const target = GRID_COLS * GRID_ROWS;
 
+        const target = GRID_COLS * GRID_ROWS;
         let created = 0;
+
         for (let r = 0; r < GRID_ROWS; r++) {
           for (let c = 0; c < GRID_COLS; c++) {
             if (created >= target) break;
@@ -612,10 +820,12 @@
 
             const id = `S${(nowMs() + created).toString(36).toUpperCase()}`;
             const seatRef = doc(db, 'rooms', roomCode, 'seats', id);
+            const pos = xyFromCell(r, c);
+
             await setDoc(seatRef, {
               id,
-              x: GRID_MARGIN + c * CELL_W,
-              y: GRID_MARGIN + r * CELL_H,
+              x: pos.x,
+              y: pos.y,
               restriction: 'A',
               occupiedBy: null,
               occupiedName: null,
@@ -640,11 +850,44 @@
 
       const deleteSeat = async (seatId) => {
         if (!isAdmin) return;
-        const ok = await confirmModal('책상 삭제', `${seatId} 책상을 삭제할까요?`);
+        const s = seats?.[seatId];
+        const label = s ? seatDisplayText(s) : seatId;
+        const ok = await confirmModal('책상 삭제', `${label} 책상을 삭제할까요?`);
         if (!ok) return;
         const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
         await deleteDoc(seatRef);
         toast(setToastMsg, '삭제했어요.');
+      };
+
+      // ✅ 관리자 "위치 스왑"
+      const swapSeats = async (aId, bId) => {
+        if (!isAdmin) return;
+        if (!aId || !bId || aId === bId) return;
+
+        const aRef = doc(db, 'rooms', roomCode, 'seats', aId);
+        const bRef = doc(db, 'rooms', roomCode, 'seats', bId);
+
+        try {
+          await runTransaction(db, async (tx) => {
+            const aSnap = await tx.get(aRef);
+            const bSnap = await tx.get(bRef);
+            if (!aSnap.exists() || !bSnap.exists()) throw new Error('SEAT_NOT_FOUND');
+
+            const a = aSnap.data();
+            const b = bSnap.data();
+
+            const ax = a.x ?? GRID_MARGIN;
+            const ay = a.y ?? GRID_MARGIN;
+            const bx = b.x ?? GRID_MARGIN;
+            const by = b.y ?? GRID_MARGIN;
+
+            tx.update(aRef, { x: bx, y: by, updatedAt: serverTimestamp() });
+            tx.update(bRef, { x: ax, y: ay, updatedAt: serverTimestamp() });
+          });
+        } catch (e) {
+          console.error('swapSeats failed', e);
+          await alertModal('스왑 실패', `책상 위치 교환에 실패했습니다.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`);
+        }
       };
 
       const cycleRestriction = async (seatId) => {
@@ -659,14 +902,19 @@
       const startTicketing = async () => {
         if (!isAdmin) return;
         if (!room) return;
+
         if (seatCount <= 0) {
           return alertModal('책상 없음', '먼저 책상을 1개 이상 배치해주세요.');
         }
-        if (joinedCount !== seatCount) {
-          return alertModal('인원 미달', `현재 ${joinedCount}명 입장 / 책상 ${seatCount}개 입니다.
-입장 인원과 책상 개수가 같아지면 시작할 수 있어요.`);
+
+        if (joinedCount > seatCount) {
+          const ok = await confirmModal(
+            '좌석이 부족합니다',
+            `입장 ${joinedCount}명 / 책상 ${seatCount}개 입니다.\n일부 학생이 자리를 선택하지 못할 수 있어요.\n그래도 시작할까요?`
+          );
+          if (!ok) return;
         }
-        // seatCount와 joinedCount가 같을 때만 시작하도록 변경(추가 확인 불필요)
+
         const roomRef = doc(db, 'rooms', roomCode);
         await updateDoc(roomRef, {
           status: 'countdown',
@@ -696,6 +944,7 @@
         toast(setToastMsg, '배치를 종료했어요.');
       };
 
+      // ✅ 학생 자리 선택
       const studentPickSeat = async (seatId) => {
         if (!user || !room) return;
         if (room.status !== 'seating') {
@@ -726,17 +975,13 @@
             if (r === 'M' && st.gender !== 'M') throw new Error('RESTRICT_M');
             if (r === 'F' && st.gender !== 'F') throw new Error('RESTRICT_F');
 
-            // 기존 자리 비우기 (가능하면)
-            if (mySeatId && mySeatId !== seatId) {
-              const oldRef = doc(db, 'rooms', roomCode, 'seats', mySeatId);
+            // 기존 자리 비우기
+            const currentMySeatId = Object.values(seats || {}).find((x) => x.occupiedBy === user.uid)?.id ?? null;
+            if (currentMySeatId && currentMySeatId !== seatId) {
+              const oldRef = doc(db, 'rooms', roomCode, 'seats', currentMySeatId);
               const oldSnap = await tx.get(oldRef);
               if (oldSnap.exists() && oldSnap.data().occupiedBy === user.uid) {
-                tx.update(oldRef, {
-                  occupiedBy: null,
-                  occupiedName: null,
-                  occupiedGender: null,
-                  updatedAt: serverTimestamp(),
-                });
+                tx.update(oldRef, { occupiedBy: null, occupiedName: null, occupiedGender: null, updatedAt: serverTimestamp() });
               }
             }
 
@@ -747,20 +992,32 @@
               updatedAt: serverTimestamp(),
             });
           });
+
           toast(setToastMsg, '자리 선택 완료!');
         } catch (e) {
           console.error(e);
+
+          if (e?.code === 'permission-denied') {
+            return alertModal(
+              '선택 불가 (권한)',
+              `Firestore Rules에서 학생이 seats 문서를 update 할 권한이 없습니다.\n\ncode: ${e.code}\nmsg: ${e.message}\n\n※ Rules를 보여주면 바로 수정해줄게요.`
+            );
+          }
+
           const msg =
             e.message === 'OCCUPIED' ? '이미 누군가 앉아 있어요.' :
             e.message === 'RESTRICT_M' ? '이 자리는 남학생만 앉을 수 있어요.' :
             e.message === 'RESTRICT_F' ? '이 자리는 여학생만 앉을 수 있어요.' :
             e.message === 'NOT_SEATING' ? '아직 선택 시간이 아니에요.' :
             e.message === 'NOT_JOINED' ? '먼저 교실에 입장해주세요.' :
-            '선택에 실패했어요. 잠시 후 다시 시도해주세요.';
+            `선택에 실패했어요.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`;
           await alertModal('선택 불가', msg);
         }
       };
 
+      /*******************************************************
+       * 관리자 자리 조정(학생 이동)
+       *******************************************************/
       const adminAssignModeRef = React.useRef({ enabled: false, studentUid: null });
       const [adminAssignEnabled, setAdminAssignEnabled] = React.useState(false);
       const [adminSelectedStudentUid, setAdminSelectedStudentUid] = React.useState(null);
@@ -774,18 +1031,15 @@
         const stUid = adminAssignModeRef.current.studentUid;
         if (!adminAssignModeRef.current.enabled || !stUid) return;
 
-        // find old seat ids
         const target = seats?.[seatId];
         if (!target) return;
 
         const oldSeatId = Object.values(seats || {}).find((s) => s.occupiedBy === stUid)?.id ?? null;
         const targetOccUid = target.occupiedBy || null;
-        const targetOccOldSeatId = targetOccUid ? (Object.values(seats || {}).find((s) => s.occupiedBy === targetOccUid)?.id ?? null) : null;
-
         const st = students?.[stUid];
         if (!st) return;
 
-        const ok = await confirmModal('관리자 이동', `학생(${st.name})을(를) ${seatId}로 이동할까요?${targetOccUid ? '\n(현재 자리 사용 중인 학생과 자리 교환됩니다)' : ''}`);
+        const ok = await confirmModal('관리자 이동', `학생(${st.name})을(를) ${seatDisplayText(target)} 자리로 이동할까요?${targetOccUid ? '\n(현재 자리 사용 중인 학생과 자리 교환됩니다)' : ''}`);
         if (!ok) return;
 
         try {
@@ -797,10 +1051,8 @@
             const seatSnap = await tx.get(seatRef);
             if (!seatSnap.exists()) throw new Error('SEAT_NOT_FOUND');
 
-            // read involved seats
             const updates = [];
 
-            // clear student's old seat
             if (oldSeatId && oldSeatId !== seatId) {
               const oldRef = doc(db, 'rooms', roomCode, 'seats', oldSeatId);
               const oldSnap = await tx.get(oldRef);
@@ -809,7 +1061,6 @@
               }
             }
 
-            // if target occupied, move that student to oldSeatId (swap) or clear
             if (targetOccUid) {
               const occStudentRef = doc(db, 'rooms', roomCode, 'students', targetOccUid);
               const occSnap = await tx.get(occStudentRef);
@@ -817,20 +1068,15 @@
 
               if (oldSeatId && oldSeatId !== seatId) {
                 const swapRef = doc(db, 'rooms', roomCode, 'seats', oldSeatId);
-                // swap seat to occupant
                 updates.push([swapRef, {
                   occupiedBy: targetOccUid,
                   occupiedName: occ?.name ?? '학생',
                   occupiedGender: occ?.gender ?? null,
                   updatedAt: serverTimestamp(),
                 }]);
-              } else {
-                // no place to swap -> just clear occupant
-                // (관리자라면 의도적으로 비울 수도 있음)
               }
             }
 
-            // assign seatId to stUid
             updates.push([seatRef, {
               occupiedBy: stUid,
               occupiedName: st.name,
@@ -838,15 +1084,13 @@
               updatedAt: serverTimestamp(),
             }]);
 
-            for (const [ref, data] of updates) {
-              tx.update(ref, data);
-            }
+            for (const [ref, data] of updates) tx.update(ref, data);
           });
 
           toast(setToastMsg, '관리자 이동 완료');
         } catch (e) {
           console.error(e);
-          await alertModal('실패', '이동에 실패했습니다.');
+          await alertModal('실패', `이동에 실패했습니다.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`);
         }
       };
 
@@ -875,7 +1119,6 @@
           setCountdownLeft(left);
 
           if (left <= 0 && isAdmin) {
-            // admin auto open
             await openSeatingNow();
           }
         };
@@ -914,16 +1157,6 @@
         </div>
       );
 
-      const Card = ({ title, children, right }) => (
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
-            <div className="font-black">{title}</div>
-            {right}
-          </div>
-          <div className="p-5">{children}</div>
-        </div>
-      );
-
       const Home = () => (
         <div className="max-w-3xl mx-auto px-4 pb-10">
           <Card title="모드 선택">
@@ -948,112 +1181,6 @@
           <div className="mt-5 text-xs text-stone-500">
             * 본 버전은 단일 HTML(React+Babel) 프로토타입입니다. 운영 배포 시 번들링/호스팅/보안 점검을 권장합니다.
           </div>
-        </div>
-      );
-
-      const AdminCreate = () => (
-        <div className="max-w-3xl mx-auto px-4 pb-10">
-          <div className="flex items-center gap-3 mb-4">
-            <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
-            <div className="text-lg font-black">관리자: 교실 생성</div>
-          </div>
-
-          <Card title="교실 정보">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-bold">교실 코드</label>
-                <input
-                  value={adminRoomCode}
-                  onChange={(e) => setAdminRoomCode(e.target.value)}
-                  onBlur={() => setAdminRoomCode(normalizeRoomCode(adminRoomCode))}
- autoComplete="off"
-  spellCheck={false}
-  inputMode="latin"
-                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-sky-300 font-mono"
-                />
-                <div className="text-xs text-stone-500 mt-2">영문 대문자/숫자 3~12자 (공백/특수문자 자동 제거)</div>
-              </div>
-            </div>
-
-            <div className="mt-4 text-xs text-stone-500">* 인원 수(정원)는 "배치한 책상 개수"로 자동 결정됩니다.</div>
-
-            <div className="mt-5 flex gap-3">
-              <button
-                onClick={createRoom}
-                disabled={!user}
-                className="px-5 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black"
-              >
-                교실 생성
-              </button>
-              <button
-                onClick={() => setScreen('home')}
-                className="px-5 py-3 rounded-xl bg-stone-200 hover:bg-stone-300 font-black"
-              >
-                취소
-              </button>
-            </div>
-          </Card>
-        </div>
-      );
-
-      const StudentJoin = () => (
-        <div className="max-w-3xl mx-auto px-4 pb-10">
-          <div className="flex items-center gap-3 mb-4">
-            <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
-            <div className="text-lg font-black">학생: 교실 입장</div>
-          </div>
-
-          <Card title="입장 정보">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-bold">교실 코드</label>
-                <input
-                  value={joinRoomCode}
-                  onChange={(e) => setJoinRoomCode(e.target.value)}
-autoComplete="off"
-  spellCheck={false}
-  inputMode="latin"                  placeholder="예: 6A1"
-                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-bold">이름</label>
-                <input
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  placeholder="예: 김지민"
-                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                />
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="text-sm font-bold">성별</label>
-              <div className="mt-2 flex gap-2">
-                <button
-                  onClick={() => setStudentGender('M')}
-                  className={`px-4 py-2 rounded-xl font-black ${studentGender==='M'?'bg-sky-200':'bg-stone-200 hover:bg-stone-300'}`}
-                >
-                  남
-                </button>
-                <button
-                  onClick={() => setStudentGender('F')}
-                  className={`px-4 py-2 rounded-xl font-black ${studentGender==='F'?'bg-pink-200':'bg-stone-200 hover:bg-stone-300'}`}
-                >
-                  여
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-5 flex gap-3">
-              <button
-                onClick={() => ensureStudentDoc(joinRoomCode, studentName, studentGender)}
-                className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
-              >
-                입장하기
-              </button>
-            </div>
-          </Card>
         </div>
       );
 
@@ -1123,10 +1250,12 @@ autoComplete="off"
                   onSeatClick={async (sid) => {
                     if (adminAssignEnabled) {
                       await adminAssignSeat(sid);
-                      return;
+                      return true;
                     }
+                    return false;
                   }}
-                  onSeatDragCommit={async (sid, pos) => updateSeat(sid, pos)}
+                  onSeatMoveToCell={async (sid, pos) => updateSeat(sid, pos)}
+                  onSeatSwap={swapSeats}
                   editable={room.status === 'lobby'}
                   height={560}
                 />
@@ -1219,7 +1348,7 @@ autoComplete="off"
 
               <div className="lg:col-span-1 space-y-5">
                 <Card title="자리 편집 (대기중에만 가능)" right={<div className="text-xs text-stone-600">현재: {room.status}</div>}>
-                  <div className="text-sm text-stone-700">대기중(lobby)일 때만 드래그로 위치 변경이 가능합니다.</div>
+                  <div className="text-sm text-stone-700">대기중(lobby)일 때만 “클릭 이동/스왑”으로 배치를 바꿀 수 있어요.</div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       onClick={addSeat}
@@ -1234,7 +1363,9 @@ autoComplete="off"
                     <div className="text-sm font-black">선택된 책상</div>
                     {selectedSeat ? (
                       <div className="mt-2">
-                        <div className="text-sm text-stone-700">ID: <span className="font-mono font-black">{selectedSeat.id}</span></div>
+                        <div className="text-sm text-stone-700">
+                          번호: <span className="font-black">{seatDisplayText(selectedSeat)}</span>
+                        </div>
                         <div className="text-sm text-stone-700">제한: <span className="font-black">{restrictionMeta[selectedSeat.restriction || 'A']?.label}</span></div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
@@ -1252,9 +1383,6 @@ autoComplete="off"
                             삭제
                           </button>
                         </div>
-                        <div className="mt-2 text-xs text-stone-500">
-                          * 요구사항의 "스크롤로 위치 변경"은 프로토타입에서 드래그 이동으로 구현했습니다.
-                        </div>
                       </div>
                     ) : (
                       <div className="mt-2 text-sm text-stone-500">책상을 클릭해 선택하세요.</div>
@@ -1265,14 +1393,16 @@ autoComplete="off"
                 <Card title="입장한 학생 목록" right={<div className="text-xs text-stone-600">{joinedCount}명</div>}>
                   <div className="space-y-2 max-h-[360px] overflow-auto pr-1">
                     {Object.values(students || {}).map((s) => {
-                      const seatId = Object.values(seats || {}).find((x) => x.occupiedBy === s.id)?.id ?? null;
+                      const seatObj = Object.values(seats || {}).find((x) => x.occupiedBy === s.id) || null;
                       return (
                         <div key={s.id} className="p-3 rounded-xl bg-stone-50 border border-stone-200">
                           <div className="flex items-center justify-between">
                             <div className="font-black">{s.name}</div>
                             <div className="text-xs font-black px-2 py-0.5 rounded-full bg-stone-200">{genderLabel(s.gender)}</div>
                           </div>
-                          <div className="text-xs text-stone-600 mt-1">자리: {seatId ? <span className="font-mono font-black">{seatId}</span> : '미배정'}</div>
+                          <div className="text-xs text-stone-600 mt-1">
+                            자리: {seatObj ? <span className="font-black">{seatDisplayText(seatObj)}</span> : '미배정'}
+                          </div>
                         </div>
                       );
                     })}
@@ -1284,7 +1414,6 @@ autoComplete="off"
           </div>
         );
       };
-
 
       const StudentRoom = () => {
         if (roomLoading) {
@@ -1356,10 +1485,13 @@ autoComplete="off"
                     height={560}
                   />
                 </div>
+
                 <div className="lg:col-span-1 space-y-5">
                   <Card title="내 자리">
                     <div className="text-sm text-stone-700">현재 선택된 자리</div>
-                    <div className="mt-2 text-2xl font-black">{mySeatId ?? '미선택'}</div>
+                    <div className="mt-2 text-2xl font-black">
+                      {mySeatId ? seatDisplayText(seats?.[mySeatId] || { x: 0, y: 0 }) : '미선택'}
+                    </div>
                     {room.status === 'ended' ? (
                       <div className="mt-2 text-sm text-rose-700 font-bold">배치가 종료되어 더 이상 변경할 수 없습니다.</div>
                     ) : (
@@ -1369,9 +1501,9 @@ autoComplete="off"
 
                   <Card title="자리 색상 안내">
                     <div className="space-y-2 text-sm">
-                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-sky-200 border border-sky-300"></span><span className="font-bold">파랑(남):</span> 남학생만</div>
-                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-pink-200 border border-pink-300"></span><span className="font-bold">분홍(여):</span> 여학생만</div>
-                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-stone-200 border border-stone-300"></span><span className="font-bold">회색(공용):</span> 모두 가능</div>
+                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#CFEFFF] border border-sky-300"></span><span className="font-bold">파랑(남):</span> 남학생만</div>
+                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#FFD7E8] border border-pink-300"></span><span className="font-bold">분홍(여):</span> 여학생만</div>
+                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#FFF2B2] border border-amber-200"></span><span className="font-bold">노랑(공용):</span> 모두 가능</div>
                     </div>
                   </Card>
 
@@ -1388,11 +1520,29 @@ autoComplete="off"
       // screen routing
       let body = null;
       if (screen === 'home') body = <Home />;
-      else if (screen === 'adminCreate') body = <AdminCreate />;
-      else if (screen === 'studentJoin') body = <StudentJoin />;
+      else if (screen === 'adminCreate') body = (
+        <AdminCreateView
+          adminRoomCode={adminRoomCode}
+          setAdminRoomCode={setAdminRoomCode}
+          setScreen={setScreen}
+          createRoom={createRoom}
+          user={user}
+        />
+      );
+      else if (screen === 'studentJoin') body = (
+        <StudentJoinView
+          joinRoomCode={joinRoomCode}
+          setJoinRoomCode={setJoinRoomCode}
+          studentName={studentName}
+          setStudentName={setStudentName}
+          studentGender={studentGender}
+          setStudentGender={setStudentGender}
+          ensureStudentDoc={ensureStudentDoc}
+          setScreen={setScreen}
+        />
+      );
       else if (screen === 'adminRoom') body = <AdminRoom />;
       else if (screen === 'studentRoom') body = <StudentRoom />;
-
 
       return (
         <div className="min-h-screen">
