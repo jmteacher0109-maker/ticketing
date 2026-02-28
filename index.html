@@ -452,10 +452,12 @@
             <div className="text-[11px] font-bold text-stone-600">{genderLabel(seat.occupiedGender)}</div>
           )}
 
-          {auctionEnabled && (
-            <div className="mt-0.5 text-[10px] font-black text-stone-700">
-              ₩{Number(seat.price || 0)}
-              {lockActive ? <span className="ml-1 text-rose-700">입찰중</span> : null}
+          {auctionEnabled && (() => {
+  const shownPrice = Number(seat.price || 0) > 0 ? Number(seat.price || 0) : Number(seat.minPrice || 0);
+  return (
+    <div className="mt-0.5 text-[10px] font-black text-stone-700">
+      ₩{shownPrice}
+      {lockActive ? <span className="ml-1 text-rose-700">입찰중</span> : null}
             </div>
           )}
         </button>
@@ -1250,6 +1252,7 @@
       const [auctionBid, setAuctionBid] = React.useState("");
       const [auctionBusy, setAuctionBusy] = React.useState(false);
       const [lockTick, setLockTick] = React.useState(0);
+      const auctionGraceUntilRef = React.useRef(0);
 
       React.useEffect(() => {
         if (!auctionOpen) return;
@@ -1484,6 +1487,7 @@
         const st = students?.[user.uid];
         const minBid = computeMinBid(seat, st);
         setAuctionBid(String(minBid));
+        auctionGraceUntilRef.current = nowMs() + 1200;
         setAuctionOpen(true);
       };
 
@@ -1991,22 +1995,35 @@
           return clamp(Math.ceil(leftMs / 1000), 0, Math.ceil(lockMs / 1000));
         })();
 
-        React.useEffect(() => {
-          // 잠금이 만료되면 모달 자동 종료(다른 학생이 가져갈 수 있으므로)
-          if (!auctionOpen) return;
-          if (!auctionSeat) return;
-          const lock = auctionSeat.bidLock;
-          const active = isLockActive(lock);
-          const mine = lock?.uid === user.uid;
-          if (!active || !mine) {
-            (async () => {
-              await alertModal('입찰 종료', '입찰 시간이 만료되었거나 잠금이 해제되었습니다.\n다시 좌석을 클릭해 주세요.');
-              setAuctionOpen(false);
-              setAuctionSeatId(null);
-              setAuctionBid("");
-            })();
-          }
-        }, [lockTick, auctionOpen, auctionSeatId, auctionSeat?.bidLock?.expiresAt, auctionSeat?.bidLock?.uid]);
+       React.useEffect(() => {
+  if (!auctionOpen) return;
+  if (!auctionSeat) return;
+
+  // ✅ 오픈 직후 유예시간: 스냅샷이 아직 lock을 반영 못해도 종료 처리하지 않음
+  if (nowMs() < (auctionGraceUntilRef.current || 0)) return;
+
+  const lock = auctionSeat.bidLock;
+  const active = isLockActive(lock);
+  const mine = lock?.uid === user.uid;
+
+  if (!active || !mine) {
+    // ✅ 먼저 모달을 닫고(겹침 방지)
+    setAuctionOpen(false);
+    setAuctionSeatId(null);
+    setAuctionBid("");
+
+    // ✅ 그 다음 안내 모달
+    setTimeout(() => {
+      alertModal('입찰 종료', '입찰 시간이 만료되었거나 잠금이 해제되었습니다.\n다시 좌석을 클릭해 주세요.');
+    }, 0);
+  }
+}, [
+  lockTick,
+  auctionOpen,
+  auctionSeatId,
+  auctionSeat?.bidLock?.expiresAt,
+  auctionSeat?.bidLock?.uid
+]);
 
         return (
           <div className="max-w-6xl mx-auto px-4 pb-10">
