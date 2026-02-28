@@ -399,70 +399,74 @@
 
     // ✅ 좌석(학생 친화 스타일)
     const SeatTile = React.memo(function SeatTile({
-      seat,
-      isAdmin,
-      isSelected,
-      isPending,
-      onClick,
-      auctionEnabled,
-      currentUid,
-    }) {
-      const meta = restrictionMeta[seat.restriction || 'A'] || restrictionMeta.A;
-      const occupied = !!seat.occupiedBy;
-      const name = seat.occupiedName || '';
+  seat,
+  isAdmin,
+  isSelected,
+  isPending,
+  onClick,
+  auctionEnabled,
+  currentUid,
+}) {
+  const meta = restrictionMeta[seat.restriction || 'A'] || restrictionMeta.A;
+  const occupied = !!seat.occupiedBy;
+  const name = seat.occupiedName || '';
 
-      const lockActive = auctionEnabled && isLockActive(seat.bidLock);
-      const lockedByOther = lockActive && seat?.bidLock?.uid && seat.bidLock.uid !== currentUid;
+  const lockActive = auctionEnabled && isLockActive(seat.bidLock);
+  const lockedByOther = lockActive && seat?.bidLock?.uid && seat.bidLock.uid !== currentUid;
 
-      const ringCls = isPending
-        ? "ring-4 ring-emerald-500 scale-[1.03]"
-        : isSelected
-          ? "ring-4 ring-emerald-400 scale-[1.03]"
-          : lockedByOther
-            ? "ring-4 ring-rose-300"
-            : "ring-2 ring-transparent hover:ring-2 hover:ring-stone-300";
+  const ringCls = isPending
+    ? "ring-4 ring-emerald-500 scale-[1.03]"
+    : isSelected
+      ? "ring-4 ring-emerald-400 scale-[1.03]"
+      : lockedByOther
+        ? "ring-4 ring-rose-300"
+        : "ring-2 ring-transparent hover:ring-2 hover:ring-stone-300";
 
-      return (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onClick?.(); }}
-          className={[
-            "no-select",
-            "w-[92px] h-[74px]",
-            "rounded-2xl",
-            "shadow-sm",
-            "transition-all",
-            "flex flex-col items-center justify-center",
-            meta.seat,
-            ringCls,
-            lockedByOther ? "opacity-70 cursor-not-allowed" : "",
-          ].join(" ")}
-          disabled={lockedByOther}
-          title={lockedByOther ? "다른 학생이 입찰 중" : ""}
-        >
-          <div className="text-[11px] font-black text-stone-700">
-            {seatDisplayText(seat)}
-          </div>
+  // ✅ 표시 가격: price가 있으면 price, 없으면 minPrice
+  const shownPrice =
+    Number(seat?.price || 0) > 0 ? Number(seat.price || 0) : Number(seat?.minPrice || 0);
 
-          <div className={["mt-1 text-[12px] font-black", occupied ? "text-stone-900" : "text-amber-700"].join(" ")}>
-            {occupied ? name : "빈자리"}
-          </div>
-
-          {occupied && (
-            <div className="text-[11px] font-bold text-stone-600">{genderLabel(seat.occupiedGender)}</div>
-          )}
-
-          {auctionEnabled && (() => {
-  const shownPrice = Number(seat.price || 0) > 0 ? Number(seat.price || 0) : Number(seat.minPrice || 0);
   return (
-    <div className="mt-0.5 text-[10px] font-black text-stone-700">
-      ₩{shownPrice}
-      {lockActive ? <span className="ml-1 text-rose-700">입찰중</span> : null}
-            </div>
-          )}
-        </button>
-      );
-    });
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+      className={[
+        "no-select",
+        "w-[92px] h-[74px]",
+        "rounded-2xl",
+        "shadow-sm",
+        "transition-all",
+        "flex flex-col items-center justify-center",
+        meta.seat,
+        ringCls,
+        lockedByOther ? "opacity-70 cursor-not-allowed" : "",
+      ].join(" ")}
+      disabled={lockedByOther}
+      title={lockedByOther ? "다른 학생이 입찰 중" : ""}
+    >
+      <div className="text-[11px] font-black text-stone-700">
+        {seatDisplayText(seat)}
+      </div>
+
+      <div className={["mt-1 text-[12px] font-black", occupied ? "text-stone-900" : "text-amber-700"].join(" ")}>
+        {occupied ? name : "빈자리"}
+      </div>
+
+      {occupied && (
+        <div className="text-[11px] font-bold text-stone-600">
+          {genderLabel(seat.occupiedGender)}
+        </div>
+      )}
+
+      {auctionEnabled && (
+        <div className="mt-0.5 text-[10px] font-black text-stone-700">
+          ₩{shownPrice}
+          {lockActive ? <span className="ml-1 text-rose-700">입찰중</span> : null}
+        </div>
+      )}
+    </button>
+  );
+});
 
     /*******************************************************
      * 학생 친화 교실 UI + 좌석 그리드
