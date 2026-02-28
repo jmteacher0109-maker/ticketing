@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>자리 티켓팅 프로그램 v2 (경매 모드 + 일시정지/재개)</title>
+  <title>자리 티켓팅 프로그램 v2 (경매 모드 + 일시정지/재개) - 안정화</title>
 
   <link rel="icon" href="data:," />
 
@@ -193,22 +193,28 @@
     };
 
     /*******************************************************
-     * Auction Modal (✅ "낮은 입찰"은 모달 안에서만 에러로 처리)
+     * Auction Modal (✅ 로컬 state로 입력 관리 + 깜빡임 최소화)
      *******************************************************/
     function AuctionModal({
       seat,
       minBid,
-      defaultBid,
+      initialBid,
       expiresAtMillis,
-      onChangeBid,
-      bid,
-      onSubmit,
+      busy,
       onCancel,
-      disabled,
-      errorMsg, // ✅ 추가
+      onSubmit,
     }) {
+      const [localBid, setLocalBid] = React.useState(String(initialBid ?? ""));
+      const [error, setError] = React.useState(null);
       const [leftSec, setLeftSec] = React.useState(0);
 
+      // ✅ 새 좌석을 열었을 때만 초기값 리셋
+      React.useEffect(() => {
+        setLocalBid(String(initialBid ?? ""));
+        setError(null);
+      }, [seat?.id, initialBid]);
+
+      // ✅ 모달 내부 1초 타이머(부모 전체 리렌더 유발 X)
       React.useEffect(() => {
         if (!expiresAtMillis) { setLeftSec(0); return; }
 
@@ -222,8 +228,33 @@
         return () => clearInterval(t);
       }, [expiresAtMillis]);
 
+      const shownPrice =
+        Number(seat?.price || 0) > 0 ? Number(seat.price || 0) : Number(seat?.minPrice || 0);
+
+      const onClickSubmit = () => {
+        if (busy) return;
+
+        const bidNum = Number(localBid);
+        if (!Number.isFinite(bidNum) || bidNum <= 0) {
+          setError('입찰 금액을 숫자로 입력해주세요.');
+          return;
+        }
+        if (bidNum % 10 !== 0) {
+          setError('입찰 금액은 10단위로 입력해주세요. (예: 100, 110, 120)');
+          return;
+        }
+        if (bidNum < Number(minBid || 0)) {
+          setError(`입찰 금액이 너무 낮아요. 최소 입찰은 ${minBid}원 입니다.`);
+          return;
+        }
+
+        setError(null);
+        onSubmit(String(bidNum));
+      };
+
       return (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+        // ✅ 경매 모달은 animate-fade-in 제거(리마운트/재생성 감지되면 깜빡임 유발)
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -236,7 +267,7 @@
                 onClick={onCancel}
                 className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
                 title="닫기"
-                disabled={disabled}
+                disabled={busy}
               >
                 ✕
               </button>
@@ -247,7 +278,10 @@
                 현재 소유: <span className="font-black">{seat?.occupiedName ? seat.occupiedName : '없음(빈자리)'}</span>
               </div>
               <div className="text-sm text-stone-700 mt-1">
-                현재 가격: <span className="font-black">{Number(seat?.price || 0)}</span>
+                현재 표시 가격: <span className="font-black">₩{shownPrice}</span>
+              </div>
+              <div className="text-sm text-stone-700 mt-1">
+                현재 가격(price): <span className="font-black">{Number(seat?.price || 0)}</span>
               </div>
               <div className="text-sm text-stone-700 mt-1">
                 최소가격(교사 설정): <span className="font-black">{Number(seat?.minPrice || 0)}</span>
@@ -264,57 +298,57 @@
             <div className="mt-4">
               <label className="text-sm font-bold">내 입찰 금액</label>
               <input
-                value={bid}
-                onChange={(e) => onChangeBid(e.target.value)}
-                placeholder={String(defaultBid)}
+                value={localBid}
+                onChange={(e) => { setError(null); setLocalBid(e.target.value.replace(/[^\d]/g, '')); }}
+                placeholder={String(initialBid ?? '')}
                 className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-black"
                 inputMode="numeric"
-                disabled={disabled}
+                disabled={busy}
               />
+
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
-                  onClick={() => onChangeBid(String(minBid))}
-                  disabled={disabled}
+                  onClick={() => { setError(null); setLocalBid(String(minBid)); }}
+                  disabled={busy}
                 >
                   최소({minBid})
                 </button>
                 <button
                   className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
-                  onClick={() => onChangeBid(String(roundUpTo10((Number(bid || 0)) + 10)))}
-                  disabled={disabled}
+                  onClick={() => { setError(null); setLocalBid(String(roundUpTo10((Number(localBid || 0)) + 10))); }}
+                  disabled={busy}
                 >
                   +10
                 </button>
                 <button
                   className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
-                  onClick={() => onChangeBid(String(roundUpTo10((Number(bid || 0)) + 50)))}
-                  disabled={disabled}
+                  onClick={() => { setError(null); setLocalBid(String(roundUpTo10((Number(localBid || 0)) + 50))); }}
+                  disabled={busy}
                 >
                   +50
                 </button>
               </div>
-            </div>
 
-            {/* ✅ 낮은 입찰/형식 오류는 여기서만 표시 (전역 alert X) */}
-            {errorMsg ? (
-              <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-bold">
-                {errorMsg}
-              </div>
-            ) : null}
+              {error && (
+                <div className="mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-bold whitespace-pre-line">
+                  {error}
+                </div>
+              )}
+            </div>
 
             <div className="mt-6 flex gap-3 justify-end">
               <button
                 onClick={onCancel}
                 className="px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
-                disabled={disabled}
+                disabled={busy}
               >
                 취소
               </button>
               <button
-                onClick={onSubmit}
+                onClick={onClickSubmit}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black disabled:opacity-50"
-                disabled={disabled}
+                disabled={busy}
               >
                 입찰/구매하기
               </button>
@@ -397,7 +431,6 @@
       );
     }
 
-    // ✅ 문(door) 장식
     function Door({ position = "top" }) {
       return (
         <div
@@ -418,7 +451,6 @@
       );
     }
 
-    // ✅ 좌석(학생 친화 스타일)
     const SeatTile = React.memo(function SeatTile({
       seat,
       isSelected,
@@ -442,7 +474,6 @@
             ? "ring-4 ring-rose-300"
             : "ring-2 ring-transparent hover:ring-2 hover:ring-stone-300";
 
-      // ✅ 표시 가격: price가 있으면 price, 없으면 minPrice
       const shownPrice =
         Number(seat?.price || 0) > 0 ? Number(seat.price || 0) : Number(seat?.minPrice || 0);
 
@@ -486,9 +517,6 @@
       );
     });
 
-    /*******************************************************
-     * 학생 친화 교실 UI + 좌석 그리드
-     *******************************************************/
     function SeatCanvas({
       isAdmin,
       seats,
@@ -502,12 +530,10 @@
       auctionEnabled,
       currentUid,
     }) {
-      // 관리자 클릭 이동용 상태
       const [pendingMoveSeatId, setPendingMoveSeatId] = React.useState(null);
 
       const seatList = React.useMemo(() => Object.values(seats || {}), [seats]);
 
-      // cellKey -> seat
       const seatByCell = React.useMemo(() => {
         const m = new Map();
         for (const s of seatList) {
@@ -523,13 +549,11 @@
       }, [seatByCell]);
 
       const handleCellClick = React.useCallback(async (row, col) => {
-        // 학생/편집불가면: 선택 해제만
         if (!editable || !isAdmin) {
           setSelectedSeatId(null);
           return;
         }
 
-        // 이동 대기중이면: 스왑 or 빈칸 이동
         if (pendingMoveSeatId) {
           const targetSeatId = seatIdAtCell(row, col);
 
@@ -544,12 +568,10 @@
           return;
         }
 
-        // 이동대기 없으면: 선택 해제
         setSelectedSeatId(null);
       }, [editable, isAdmin, pendingMoveSeatId, seatIdAtCell, onSeatSwap, onSeatMoveToCell, setSelectedSeatId]);
 
       const handleSeatClick = React.useCallback(async (seatId) => {
-        // 관리자 + 편집 가능일 때: 배정모드 우선 처리 → 아니면 이동대기 토글
         if (isAdmin && editable) {
           const handled = await onSeatClick?.(seatId);
           if (handled) return;
@@ -559,7 +581,6 @@
           return;
         }
 
-        // 학생/일반 클릭
         setSelectedSeatId(seatId);
         await onSeatClick?.(seatId);
       }, [isAdmin, editable, onSeatClick, setSelectedSeatId]);
@@ -572,7 +593,6 @@
 
       return (
         <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
-          {/* ✅ 칠판 */}
           <div className="bg-[#1F4D34] text-white px-6 py-6">
             <div className="max-w-5xl mx-auto text-center">
               <div className="tracking-[0.3em] text-2xl font-black">CHALK BOARD</div>
@@ -583,20 +603,17 @@
           </div>
 
           <div className="bg-gradient-to-b from-[#f5f1ea] to-[#efe7dc] px-4 py-6">
-            {/* ✅ 교탁 */}
             <div className="max-w-5xl mx-auto flex justify-center">
               <div className="w-[220px] h-[46px] rounded-b-2xl bg-[#8B6B5D] shadow-md flex items-center justify-center text-white font-black tracking-widest">
                 TEACHER
               </div>
             </div>
 
-            {/* ✅ 교실 프레임 */}
             <div className="max-w-5xl mx-auto mt-5">
               <div className="relative rounded-[36px] bg-white/90 shadow-lg border border-white p-6 md:p-8">
                 <Door position="top" />
                 <Door position="bottom" />
 
-                {/* 안내 */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="font-black text-stone-700">교실</div>
                   <div className="text-xs text-stone-500 font-bold">
@@ -608,7 +625,6 @@
                   </div>
                 </div>
 
-                {/* ✅ 그리드 */}
                 <div className="w-full overflow-auto" style={{ height }}>
                   <div className="w-full flex justify-center">
                     <div className="relative">
@@ -774,8 +790,8 @@
       const [user, setUser] = React.useState(null);
       const [authReady, setAuthReady] = React.useState(false);
 
-      const [screen, setScreen] = React.useState('home');
-      const [role, setRole] = React.useState(null);
+      const [screen, setScreen] = React.useState('home'); // home | adminCreate | adminRoom | studentJoin | studentRoom
+      const [role, setRole] = React.useState(null); // 'admin' | 'student'
       const [roomCode, setRoomCode] = React.useState('');
 
       const [joinRoomCode, setJoinRoomCode] = React.useState('');
@@ -798,6 +814,12 @@
       const joinedCount = React.useMemo(() => Object.keys(students || {}).length, [students]);
       const seatCount = React.useMemo(() => Object.keys(seats || {}).length, [seats]);
 
+      // refs (학생 모달 안정화용)
+      const seatsRef = React.useRef(seats);
+      const roomRefVal = React.useRef(room);
+      React.useEffect(() => { seatsRef.current = seats; }, [seats]);
+      React.useEffect(() => { roomRefVal.current = room; }, [room]);
+
       // lobby일 때 capacity sync
       const capSyncRef = React.useRef(null);
       React.useEffect(() => {
@@ -808,8 +830,8 @@
         if (capSyncRef.current) clearTimeout(capSyncRef.current);
         capSyncRef.current = setTimeout(async () => {
           try {
-            const roomRef = doc(db, 'rooms', roomCode);
-            await updateDoc(roomRef, { capacity: desired, updatedAt: serverTimestamp() });
+            const roomDocRef = doc(db, 'rooms', roomCode);
+            await updateDoc(roomDocRef, { capacity: desired, updatedAt: serverTimestamp() });
           } catch (e) {
             console.warn('capacity sync failed', e);
           }
@@ -866,8 +888,8 @@
         }
 
         try {
-          const roomRef = doc(db, 'rooms', code);
-          const snap = await getDoc(roomRef);
+          const roomDocRef = doc(db, 'rooms', code);
+          const snap = await getDoc(roomDocRef);
 
           // ✅ 이미 존재하면: 입장
           if (snap.exists()) {
@@ -884,7 +906,7 @@
           }
 
           // ✅ 없으면: 새로 생성
-          await setDoc(roomRef, {
+          await setDoc(roomDocRef, {
             code,
             adminUid: user.uid,
             capacity: 0,
@@ -927,8 +949,8 @@
           return false;
         }
 
-        const roomRef = doc(db, 'rooms', c);
-        const roomSnap = await getDoc(roomRef);
+        const roomDocRef = doc(db, 'rooms', c);
+        const roomSnap = await getDoc(roomDocRef);
         if (!roomSnap.exists()) {
           await alertModal('교실 없음', '해당 교실 코드를 찾을 수 없습니다.');
           return false;
@@ -1059,7 +1081,6 @@
         toast(setToastMsg, '삭제했어요.');
       };
 
-      // ✅ 관리자 "위치 스왑"
       const swapSeats = async (aId, bId) => {
         if (!isAdmin) return;
         if (!aId || !bId || aId === bId) return;
@@ -1115,8 +1136,8 @@
           if (!ok) return;
         }
 
-        const roomRef = doc(db, 'rooms', roomCode);
-        await updateDoc(roomRef, {
+        const roomDocRef = doc(db, 'rooms', roomCode);
+        await updateDoc(roomDocRef, {
           status: 'countdown',
           countdownStartedAt: serverTimestamp(),
         });
@@ -1125,47 +1146,45 @@
 
       const openSeatingNow = async () => {
         if (!isAdmin) return;
-        const roomRef = doc(db, 'rooms', roomCode);
-        await updateDoc(roomRef, {
+        const roomDocRef = doc(db, 'rooms', roomCode);
+        await updateDoc(roomDocRef, {
           status: 'seating',
           seatingStartedAt: serverTimestamp(),
         });
       };
 
-      // ✅ 배치 종료(=일시정지)
       const pauseSeating = async () => {
         if (!isAdmin) return;
         const ok = await confirmModal('일시정지', '일시정지하면 학생들은 더 이상 선택/변경할 수 없습니다.\n(현재 상태는 그대로 유지됩니다)\n일시정지할까요?');
         if (!ok) return;
 
-        const roomRef = doc(db, 'rooms', roomCode);
-        await updateDoc(roomRef, {
+        const roomDocRef = doc(db, 'rooms', roomCode);
+        await updateDoc(roomDocRef, {
           status: 'paused',
           pausedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
 
-        // ✅ (권장) 입찰 잠금 해제
+        // (권장) 입찰 잠금 해제
         try {
-          const list = Object.values(seats || {});
+          const list = Object.values(seatsRef.current || {});
           await Promise.all(list.map((s) => {
             if (!s?.bidLock) return Promise.resolve();
-            const seatRef = doc(db, 'rooms', roomCode, 'seats', s.id);
-            return updateDoc(seatRef, { bidLock: null, updatedAt: serverTimestamp() });
+            const seatDocRef = doc(db, 'rooms', roomCode, 'seats', s.id);
+            return updateDoc(seatDocRef, { bidLock: null, updatedAt: serverTimestamp() });
           }));
         } catch (e) {}
 
         toast(setToastMsg, '일시정지 했어요.');
       };
 
-      // ✅ 배치 시작(=재개)
       const resumeSeating = async () => {
         if (!isAdmin) return;
         const ok = await confirmModal('배치 재개', '배치를 다시 시작할까요?\n(현재 자리 상태는 그대로 유지됩니다)');
         if (!ok) return;
 
-        const roomRef = doc(db, 'rooms', roomCode);
-        await updateDoc(roomRef, {
+        const roomDocRef = doc(db, 'rooms', roomCode);
+        await updateDoc(roomDocRef, {
           status: 'seating',
           seatingResumedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -1173,7 +1192,6 @@
         toast(setToastMsg, '배치를 다시 시작했어요!');
       };
 
-      // ✅ 경매 모드 토글
       const toggleAuction = async () => {
         if (!isAdmin || !room) return;
         const ok = await confirmModal(
@@ -1181,8 +1199,8 @@
           `경매 모드를 ${(room.auctionEnabled ? 'OFF' : 'ON')} 하시겠어요?\n\nON이면 학생은 "입찰"로 자리를 구매합니다.\nOFF이면 기존처럼 그냥 클릭해서 자리를 선택합니다.`
         );
         if (!ok) return;
-        const roomRef = doc(db, 'rooms', roomCode);
-        await updateDoc(roomRef, {
+        const roomDocRef = doc(db, 'rooms', roomCode);
+        await updateDoc(roomDocRef, {
           auctionEnabled: !(room.auctionEnabled === true),
           updatedAt: serverTimestamp(),
         });
@@ -1190,7 +1208,7 @@
       };
 
       /*******************************************************
-       * ✅ 학생 자리 선택 (선착순 모드) - currentSeatId 기반
+       * ✅ 학생 자리 선택 (선착순 모드)
        *******************************************************/
       const pickInFlightRef = React.useRef(false);
       const pickLockUntilRef = React.useRef(0);
@@ -1208,22 +1226,22 @@
 
         pickInFlightRef.current = true;
 
-        const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
-        const studentRef = doc(db, 'rooms', roomCode, 'students', user.uid);
-        const roomRef = doc(db, 'rooms', roomCode);
+        const seatDocRef = doc(db, 'rooms', roomCode, 'seats', seatId);
+        const studentDocRef = doc(db, 'rooms', roomCode, 'students', user.uid);
+        const roomDocRef = doc(db, 'rooms', roomCode);
 
         try {
           await runTransaction(db, async (tx) => {
-            const roomSnap = await tx.get(roomRef);
+            const roomSnap = await tx.get(roomDocRef);
             if (!roomSnap.exists()) throw new Error('ROOM_NOT_FOUND');
             const roomData = roomSnap.data();
             if (roomData.status !== 'seating') throw new Error('NOT_SEATING');
 
-            const stSnap = await tx.get(studentRef);
+            const stSnap = await tx.get(studentDocRef);
             if (!stSnap.exists()) throw new Error('NOT_JOINED');
             const st = stSnap.data();
 
-            const sSnap = await tx.get(seatRef);
+            const sSnap = await tx.get(seatDocRef);
             if (!sSnap.exists()) throw new Error('SEAT_NOT_FOUND');
             const s = sSnap.data();
 
@@ -1252,14 +1270,14 @@
               }
             }
 
-            tx.update(seatRef, {
+            tx.update(seatDocRef, {
               occupiedBy: user.uid,
               occupiedName: st.name,
               occupiedGender: st.gender,
               updatedAt: serverTimestamp(),
             });
 
-            tx.update(studentRef, {
+            tx.update(studentDocRef, {
               currentSeatId: seatId,
               updatedAt: serverTimestamp(),
             });
@@ -1268,8 +1286,6 @@
           toast(setToastMsg, '자리 선택 완료!');
           pickLockUntilRef.current = nowMs() + 1000;
         } catch (e) {
-          console.error(e);
-
           const msg =
             e.message === 'OCCUPIED' ? '이미 누군가 앉아 있어요.' :
             e.message === 'RESTRICT_M' ? '이 자리는 남학생만 앉을 수 있어요.' :
@@ -1289,35 +1305,31 @@
        *******************************************************/
       const [auctionOpen, setAuctionOpen] = React.useState(false);
       const [auctionSeatId, setAuctionSeatId] = React.useState(null);
-      const [auctionBid, setAuctionBid] = React.useState("");
       const [auctionBusy, setAuctionBusy] = React.useState(false);
 
-      // ✅ 핵심: 낮은 입찰/형식 오류를 "전역 alert"로 띄우지 않고 모달 안에서 표시
-      const [auctionError, setAuctionError] = React.useState(null);
-
       const auctionGraceUntilRef = React.useRef(0);
+      const lastAuctionSeatRef = React.useRef(null);
+      const initialBidRef = React.useRef(0);
 
-      const auctionSeat = auctionSeatId ? seats?.[auctionSeatId] : null;
       const me = user ? students?.[user.uid] : null;
 
-      const computeMinBid = React.useCallback((seat, meStudent) => {
+      const computeMinBid = React.useCallback((seat) => {
         const curPrice = Number(seat?.price || 0);
         const minPrice = Number(seat?.minPrice || 0);
         let minBid = Math.max(curPrice, minPrice);
 
         const occupiedBy = seat?.occupiedBy || null;
-        if (occupiedBy && occupiedBy !== user.uid) {
+        if (occupiedBy && occupiedBy !== user?.uid) {
           minBid = Math.max(minBid, curPrice + BID_STEP);
         }
-        minBid = roundUpTo10(minBid);
-        return minBid;
+        return roundUpTo10(minBid);
       }, [user?.uid]);
 
       const acquireSeatBidLock = async (seatId) => {
         if (!user || !room) return false;
         const lockMs = Number(room.auctionLockMs || DEFAULT_AUCTION_LOCK_MS);
-        const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
-        const stRef = doc(db, 'rooms', roomCode, 'students', user.uid);
+        const seatDocRef = doc(db, 'rooms', roomCode, 'seats', seatId);
+        const stDocRef = doc(db, 'rooms', roomCode, 'students', user.uid);
 
         try {
           await runTransaction(db, async (tx) => {
@@ -1327,11 +1339,11 @@
             if (roomData.status !== 'seating') throw new Error('NOT_SEATING');
             if (!roomData.auctionEnabled) throw new Error('NOT_AUCTION');
 
-            const stSnap = await tx.get(stRef);
+            const stSnap = await tx.get(stDocRef);
             if (!stSnap.exists()) throw new Error('NOT_JOINED');
             const st = stSnap.data();
 
-            const sSnap = await tx.get(seatRef);
+            const sSnap = await tx.get(seatDocRef);
             if (!sSnap.exists()) throw new Error('SEAT_NOT_FOUND');
             const s = sSnap.data();
 
@@ -1345,12 +1357,8 @@
             if (lockedByOther) throw new Error('LOCKED');
 
             const expiresAt = Timestamp.fromMillis(nowMs() + lockMs);
-            tx.update(seatRef, {
-              bidLock: {
-                uid: user.uid,
-                name: st.name || '학생',
-                expiresAt,
-              },
+            tx.update(seatDocRef, {
+              bidLock: { uid: user.uid, name: st.name || '학생', expiresAt },
               updatedAt: serverTimestamp(),
             });
           });
@@ -1372,39 +1380,38 @@
       const releaseSeatBidLock = async (seatId) => {
         if (!user || !seatId) return;
         try {
-          const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
+          const seatDocRef = doc(db, 'rooms', roomCode, 'seats', seatId);
           await runTransaction(db, async (tx) => {
-            const sSnap = await tx.get(seatRef);
+            const sSnap = await tx.get(seatDocRef);
             if (!sSnap.exists()) return;
             const s = sSnap.data();
             const lock = s.bidLock || null;
             if (lock?.uid !== user.uid) return;
-            tx.update(seatRef, { bidLock: null, updatedAt: serverTimestamp() });
+            tx.update(seatDocRef, { bidLock: null, updatedAt: serverTimestamp() });
           });
         } catch (e) {}
       };
 
-      const submitSeatBid = async (seatId, amount) => {
-        if (!user || !room) return;
-        const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
-        const studentRef = doc(db, 'rooms', roomCode, 'students', user.uid);
-        const roomRef = doc(db, 'rooms', roomCode);
+      const submitSeatBid = async (seatId, amountStr) => {
+        if (!user || !room) throw new Error('NO_USER');
+        const seatDocRef = doc(db, 'rooms', roomCode, 'seats', seatId);
+        const studentDocRef = doc(db, 'rooms', roomCode, 'students', user.uid);
+        const roomDocRef = doc(db, 'rooms', roomCode);
 
-        const bid = Number(amount);
+        const bid = Number(amountStr);
 
-        // (서버 전 검증은 onSubmit에서 하고, 여기서는 서버 트랜잭션 검증만 남겨도 됨)
         await runTransaction(db, async (tx) => {
-          const roomSnap = await tx.get(roomRef);
+          const roomSnap = await tx.get(roomDocRef);
           if (!roomSnap.exists()) throw new Error('ROOM_NOT_FOUND');
           const roomData = roomSnap.data();
           if (roomData.status !== 'seating') throw new Error('NOT_SEATING');
           if (!roomData.auctionEnabled) throw new Error('NOT_AUCTION');
 
-          const stSnap = await tx.get(studentRef);
+          const stSnap = await tx.get(studentDocRef);
           if (!stSnap.exists()) throw new Error('NOT_JOINED');
           const st = stSnap.data();
 
-          const sSnap = await tx.get(seatRef);
+          const sSnap = await tx.get(seatDocRef);
           if (!sSnap.exists()) throw new Error('SEAT_NOT_FOUND');
           const s = sSnap.data();
 
@@ -1425,6 +1432,8 @@
             minBid = Math.max(minBid, curPrice + BID_STEP);
           }
           minBid = roundUpTo10(minBid);
+
+          // ✅ 서버에서도 최종 방어
           if (bid < minBid) throw new Error('BID_TOO_LOW');
 
           // ✅ 이전 내 자리 비우기
@@ -1458,7 +1467,7 @@
           }
 
           // ✅ 자리 소유 + 가격 + 잠금 해제
-          tx.update(seatRef, {
+          tx.update(seatDocRef, {
             occupiedBy: user.uid,
             occupiedName: st.name,
             occupiedGender: st.gender,
@@ -1468,7 +1477,7 @@
           });
 
           // ✅ 학생 currentSeatId 업데이트
-          tx.update(studentRef, {
+          tx.update(studentDocRef, {
             currentSeatId: seatId,
             updatedAt: serverTimestamp(),
           });
@@ -1481,30 +1490,77 @@
           await alertModal('아직 선택 불가', '관리자가 배치를 시작(재개)해야 자리를 선택할 수 있어요.');
           return;
         }
+
         const ok = await acquireSeatBidLock(seatId);
         if (!ok) return;
 
-        setAuctionError(null); // ✅ 열 때 에러 초기화
         setAuctionSeatId(seatId);
-
-        const seat = seats?.[seatId];
-        const st = students?.[user.uid];
-        const minBid = computeMinBid(seat, st);
-        setAuctionBid(String(minBid));
-
-        // ✅ 스냅샷 반영 유예(겹침 방지)
-        auctionGraceUntilRef.current = nowMs() + 1200;
         setAuctionOpen(true);
+
+        // ✅ 초기 입찰값(열 때 한 번만 설정)
+        const seatNow = seatsRef.current?.[seatId] || null;
+        const minBidNow = computeMinBid(seatNow);
+        initialBidRef.current = minBidNow;
+
+        // ✅ 스냅샷 반영 유예
+        auctionGraceUntilRef.current = nowMs() + 1200;
       };
 
       const closeAuction = async () => {
         const sid = auctionSeatId;
         setAuctionOpen(false);
         setAuctionSeatId(null);
-        setAuctionBid("");
-        setAuctionError(null); // ✅ 닫을 때 에러 초기화
+        setAuctionBusy(false);
         if (sid) await releaseSeatBidLock(sid);
       };
+
+      // ✅ 모달이 열려있으면 “좌석 스냅샷”을 ref로 보관 (잠깐 undefined되어도 모달 유지)
+      React.useEffect(() => {
+        if (!auctionOpen) return;
+        if (!auctionSeatId) return;
+        const cur = seats?.[auctionSeatId] || null;
+        if (cur) lastAuctionSeatRef.current = cur;
+      }, [auctionOpen, auctionSeatId, seats]);
+
+      // ✅ 모달 자동 종료/안내 (모달이 열려 있을 때만 0.5초 체크 / seatsRef로 확인)
+      React.useEffect(() => {
+        if (!auctionOpen) return;
+
+        const t = setInterval(() => {
+          const r = roomRefVal.current;
+          const uid = user?.uid;
+          if (!r || !uid) return;
+
+          // seating이 아니면 바로 닫기(일시정지 포함)
+          if (r.status !== 'seating') {
+            setAuctionOpen(false);
+            setAuctionSeatId(null);
+            setAuctionBusy(false);
+            return;
+          }
+
+          if (!auctionSeatId) return;
+
+          // 오픈 직후 유예
+          if (nowMs() < (auctionGraceUntilRef.current || 0)) return;
+
+          const curSeat = seatsRef.current?.[auctionSeatId] || lastAuctionSeatRef.current || null;
+          const lock = curSeat?.bidLock || null;
+          const active = isLockActive(lock);
+          const mine = lock?.uid === uid;
+
+          if (!curSeat || !active || !mine) {
+            setAuctionOpen(false);
+            setAuctionSeatId(null);
+            setAuctionBusy(false);
+            setTimeout(() => {
+              alertModal('입찰 종료', '입찰 시간이 만료되었거나 잠금이 해제되었습니다.\n다시 좌석을 클릭해 주세요.');
+            }, 0);
+          }
+        }, 500);
+
+        return () => clearInterval(t);
+      }, [auctionOpen, auctionSeatId, user?.uid]);
 
       /*******************************************************
        * 관리자 자리 조정(학생 이동)
@@ -1566,7 +1622,6 @@
                   updatedAt: serverTimestamp(),
                 }]);
 
-                // ✅ 교환된 학생 currentSeatId 갱신
                 updates.push([occStudentRef, { currentSeatId: oldSeatId, updatedAt: serverTimestamp() }]);
               }
             }
@@ -1578,7 +1633,6 @@
               updatedAt: serverTimestamp(),
             }]);
 
-            // ✅ 이동되는 학생 currentSeatId 갱신
             const stRef = doc(db, 'rooms', roomCode, 'students', stUid);
             updates.push([stRef, { currentSeatId: seatId, updatedAt: serverTimestamp() }]);
 
@@ -1900,7 +1954,6 @@
                           제한: <span className="font-black">{restrictionMeta[selectedSeat.restriction || 'A']?.label}</span>
                         </div>
 
-                        {/* ✅ 경매: 최소가격 설정 */}
                         <div className="mt-3">
                           <div className="text-sm font-black text-stone-700">경매 최소 가격(교사 설정)</div>
                           <div className="mt-2 flex gap-2">
@@ -1989,47 +2042,12 @@
           );
         }
 
-        const me = students?.[user.uid];
         const auctionEnabled = room.auctionEnabled === true;
 
-        // ✅ 경매 모달 자동 종료/안내 (모달이 열려 있을 때만 0.5초 체크)
-        React.useEffect(() => {
-          if (!auctionOpen) return;
-
-          const t = setInterval(() => {
-            if (!auctionSeatId) return;
-
-            // 오픈 직후 유예
-            if (nowMs() < (auctionGraceUntilRef.current || 0)) return;
-
-            const curSeat = seats?.[auctionSeatId] || null;
-            const lock = curSeat?.bidLock || null;
-            const active = isLockActive(lock);
-            const mine = lock?.uid === user.uid;
-
-            if (room.status !== 'seating') {
-              setAuctionOpen(false);
-              setAuctionSeatId(null);
-              setAuctionBid("");
-              setAuctionError(null);
-              return;
-            }
-
-            if (!curSeat || !active || !mine) {
-              setAuctionOpen(false);
-              setAuctionSeatId(null);
-              setAuctionBid("");
-              setAuctionError(null);
-              setTimeout(() => {
-                alertModal('입찰 종료', '입찰 시간이 만료되었거나 잠금이 해제되었습니다.\n다시 좌석을 클릭해 주세요.');
-              }, 0);
-            }
-          }, 500);
-
-          return () => clearInterval(t);
-        }, [auctionOpen, auctionSeatId, seats, room?.status, user?.uid]);
-
-        const minBid = auctionSeat ? computeMinBid(auctionSeat, me) : 0;
+        // ✅ 모달 좌석 안정화: seats에서 못 찾는 순간이 있어도 last ref로 유지
+        const liveSeat = auctionSeatId ? seats?.[auctionSeatId] : null;
+        const stableSeat = liveSeat || lastAuctionSeatRef.current || null;
+        const minBid = stableSeat ? computeMinBid(stableSeat) : 0;
 
         return (
           <div className="max-w-6xl mx-auto px-4 pb-10">
@@ -2141,65 +2159,43 @@
               </div>
             )}
 
-            {auctionOpen && auctionSeat && (
+            {/* ✅ 모달은 auctionOpen이면 유지(좌석이 순간 undefined되어도 리마운트 방지) */}
+            {auctionOpen && (
               <AuctionModal
-                seat={auctionSeat}
+                seat={stableSeat}
                 minBid={minBid}
-                defaultBid={minBid}
-                expiresAtMillis={auctionSeat?.bidLock?.expiresAt?.toMillis?.() ?? null}
-                bid={auctionBid}
-                onChangeBid={(v) => {
-                  setAuctionError(null); // ✅ 입력 바꾸면 에러 지움
-                  setAuctionBid(v.replace(/[^\d]/g, ''));
-                }}
-                disabled={auctionBusy}
-                errorMsg={auctionError}  // ✅ 추가
+                initialBid={initialBidRef.current || minBid}
+                expiresAtMillis={stableSeat?.bidLock?.expiresAt?.toMillis?.() ?? null}
+                busy={auctionBusy}
                 onCancel={async () => { await closeAuction(); }}
-                onSubmit={async () => {
+                onSubmit={async (bidStr) => {
                   if (auctionBusy) return;
 
-                  // ✅ 1) 먼저 "로컬 검증"으로 BID_TOO_LOW 상황을 막고,
-                  // ✅ 2) 실패해도 버튼/모달이 멈추지 않게 함 (이게 지금 버그의 핵심)
-                  const bidNum = Number(auctionBid);
-                  if (!Number.isFinite(bidNum) || bidNum <= 0) {
-                    setAuctionError('입찰 금액을 숫자로 입력해주세요.');
-                    return;
-                  }
-                  if (bidNum % 10 !== 0) {
-                    setAuctionError('입찰 금액은 10단위로 입력해주세요. (예: 100, 110, 120)');
-                    return;
-                  }
-                  if (bidNum < minBid) {
-                    setAuctionError(`입찰 금액이 너무 낮아요. 최소 입찰은 ${minBid}원 입니다.`);
-                    // ✅ 아래처럼 자동으로 최소로 맞춰주고 싶으면 주석 해제
-                    // setAuctionBid(String(minBid));
-                    return;
-                  }
+                  // ✅ 최종 로컬 검증(추가 안전)
+                  const bidNum = Number(bidStr);
+                  if (!Number.isFinite(bidNum) || bidNum <= 0) return;
+                  if (bidNum % 10 !== 0) return;
+                  if (bidNum < minBid) return;
 
                   setAuctionBusy(true);
-                  setAuctionError(null);
-
                   try {
-                    await submitSeatBid(auctionSeat.id, auctionBid);
-
-                    // ✅ 성공 시 닫기
+                    await submitSeatBid(stableSeat?.id || auctionSeatId, bidStr);
+                    toast(setToastMsg, '경매 구매 완료!');
                     setAuctionOpen(false);
                     setAuctionSeatId(null);
-                    setAuctionBid("");
-                    setAuctionError(null);
-
-                    toast(setToastMsg, '경매 구매 완료!');
                   } catch (e) {
-                    // ✅ 서버에서 실패해도 "모달 내부"에만 표시 (전역 alert 남발 방지)
-                    const msg =
-                      e.message === 'NO_LOCK' ? '입찰 잠금이 없습니다. 다시 좌석을 클릭해 주세요.' :
-                      e.message === 'BID_TOO_LOW' ? `입찰 금액이 최소입찰보다 작습니다. (최소: ${minBid})` :
-                      e.message === 'RESTRICT_M' ? '이 자리는 남학생만 입찰할 수 있어요.' :
-                      e.message === 'RESTRICT_F' ? '이 자리는 여학생만 입찰할 수 있어요.' :
-                      e.message === 'NOT_AUCTION' ? '경매 모드가 아닙니다.' :
-                      e.message === 'NOT_SEATING' ? '지금은 입찰할 수 없어요.' :
-                      '입찰에 실패했어요.';
-                    setAuctionError(msg);
+                    // ✅ 실패해도 busy는 반드시 풀려서 “먹통” 방지
+                    if (e?.message === 'BID_TOO_LOW') {
+                      // 서버에서 가격이 올라간 케이스
+                      await alertModal('입찰 실패', `입찰 금액이 최소입찰보다 작습니다.\n현재 최소입찰: ${minBid}`);
+                    } else if (e?.message === 'NO_LOCK') {
+                      await alertModal('입찰 실패', '입찰 잠금이 없습니다. 다시 좌석을 클릭해 주세요.');
+                    } else if (e?.message === 'NOT_SEATING') {
+                      await alertModal('입찰 실패', '지금은 입찰할 수 없어요.');
+                    } else {
+                      // 기타
+                      await alertModal('입찰 실패', '입찰에 실패했어요. 다시 시도해 주세요.');
+                    }
                   } finally {
                     setAuctionBusy(false);
                   }
