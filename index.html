@@ -639,11 +639,15 @@
         return () => { if (capSyncRef.current) clearTimeout(capSyncRef.current); };
       }, [room?.status, room?.capacity, seatCount, isAdmin, roomCode]);
 
-      const mySeatId = React.useMemo(() => {
-        if (!user) return null;
-        const found = Object.values(seats || {}).find((s) => s.occupiedBy === user.uid);
-        return found?.id ?? null;
-      }, [seats, user]);
+     const mySeatId = React.useMemo(() => {
+  if (!user) return null;
+  const me = students?.[user.uid];
+  if (me?.currentSeatId) return me.currentSeatId;
+
+  // fallback (예전 데이터/호환)
+  const found = Object.values(seats || {}).find((s) => s.occupiedBy === user.uid);
+  return found?.id ?? null;
+}, [seats, students, user]);
 
       // auth init
       React.useEffect(() => {
@@ -688,30 +692,41 @@
         try {
           const roomRef = doc(db, 'rooms', code);
           const snap = await getDoc(roomRef);
-          if (snap.exists()) {
-            return alertModal('이미 존재', '이미 생성된 교실 코드입니다. 다른 코드를 사용하세요.');
-          }
+           if (snap.exists()) {
+      const data = snap.data();
 
-          await setDoc(roomRef, {
-            code,
-            adminUid: user.uid,
-            capacity: 0,
-            status: 'lobby',
-            countdownSeconds: 10,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+      // (권장) 관리자 UID가 다르면 관리자 화면 입장 불가
+      if (data.adminUid && user?.uid && data.adminUid !== user.uid) {
+        return alertModal('관리자 권한 없음', '이미 생성된 교실이지만, 이 교실의 관리자가 아닙니다.');
+      }
 
-          toast(setToastMsg, `교실 생성 완료: ${code}`);
-          setRoomCode(code);
-          setRole('admin');
-          setScreen('adminRoom');
+      toast(setToastMsg, `기존 교실로 입장: ${code}`);
+      setRoomCode(code);
+      setRole('admin');
+      setScreen('adminRoom');
+      return;
+    }
 
-        } catch (e) {
-          console.error('createRoom failed:', e);
-          return alertModal(
-            '교실 생성 실패',
-            `에러: ${e?.code || e?.message || 'unknown'}\n\n(대부분 Firestore Rules 권한 문제입니다)`
+    // ✅ 없으면: 새로 생성
+    await setDoc(roomRef, {
+      code,
+      adminUid: user.uid,
+      capacity: 0,
+      status: 'lobby',
+      countdownSeconds: 10,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    toast(setToastMsg, `교실 생성 완료: ${code}`);
+    setRoomCode(code);
+    setRole('admin');
+    setScreen('adminRoom');
+  } catch (e) {
+    console.error('createRoom failed:', e);
+    return alertModal(
+      '교실 생성 실패',
+      `에러: ${e?.code || e?.message || 'unknown'}\n\n(대부분 Firestore Rules 권한 문제입니다)`
           );
         }
       };
@@ -743,7 +758,11 @@
         const studentRef = doc(db, 'rooms', c, 'students', user.uid);
         const existing = await getDoc(studentRef);
         if (!existing.exists()) {
-          await setDoc(studentRef, { name: n, gender, joinedAt: serverTimestamp() }, { merge: true });
+         await setDoc(
+  studentRef,
+  { name: n, gender, currentSeatId: null, joinedAt: serverTimestamp() },
+  { merge: true }
+);
         }
 
         setRoomCode(c);
@@ -944,76 +963,115 @@
         toast(setToastMsg, '배치를 종료했어요.');
       };
 
-      // ✅ 학생 자리 선택
-      const studentPickSeat = async (seatId) => {
-        if (!user || !room) return;
-        if (room.status !== 'seating') {
-          return alertModal('아직 선택 불가', '관리자가 배치를 시작해야 자리를 선택할 수 있어요.');
-        }
-        if (role !== 'student') return;
+     // ✅ 학생 자리 선택 (중복/연타 방지 강화 버전)
+const pickInFlightRef = React.useRef(false);
+const pickLockUntilRef = React.useRef(0);
 
-        const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
-        const studentRef = doc(db, 'rooms', roomCode, 'students', user.uid);
+const studentPickSeat = async (seatId) => {
+  if (!user || !room) return;
+  if (role !== 'student') return;
 
-        try {
-          await runTransaction(db, async (tx) => {
-            const roomSnap = await tx.get(doc(db, 'rooms', roomCode));
-            if (!roomSnap.exists()) throw new Error('ROOM_NOT_FOUND');
-            const roomData = roomSnap.data();
-            if (roomData.status !== 'seating') throw new Error('NOT_SEATING');
+  // ✅ 1) 클라이언트 연타 방지 (요청 중 or 쿨다운)
+  if (pickInFlightRef.current) return;
+  if (nowMs() < (pickLockUntilRef.current || 0)) return;
 
-            const stSnap = await tx.get(studentRef);
-            if (!stSnap.exists()) throw new Error('NOT_JOINED');
-            const st = stSnap.data();
+  if (room.status !== 'seating') {
+    return alertModal('아직 선택 불가', '관리자가 배치를 시작해야 자리를 선택할 수 있어요.');
+  }
 
-            const sSnap = await tx.get(seatRef);
-            if (!sSnap.exists()) throw new Error('SEAT_NOT_FOUND');
-            const s = sSnap.data();
-            if (s.occupiedBy) throw new Error('OCCUPIED');
+  pickInFlightRef.current = true;
 
-            const r = s.restriction || 'A';
-            if (r === 'M' && st.gender !== 'M') throw new Error('RESTRICT_M');
-            if (r === 'F' && st.gender !== 'F') throw new Error('RESTRICT_F');
+  const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
+  const studentRef = doc(db, 'rooms', roomCode, 'students', user.uid);
+  const roomRef = doc(db, 'rooms', roomCode);
 
-            // 기존 자리 비우기
-            const currentMySeatId = Object.values(seats || {}).find((x) => x.occupiedBy === user.uid)?.id ?? null;
-            if (currentMySeatId && currentMySeatId !== seatId) {
-              const oldRef = doc(db, 'rooms', roomCode, 'seats', currentMySeatId);
-              const oldSnap = await tx.get(oldRef);
-              if (oldSnap.exists() && oldSnap.data().occupiedBy === user.uid) {
-                tx.update(oldRef, { occupiedBy: null, occupiedName: null, occupiedGender: null, updatedAt: serverTimestamp() });
-              }
-            }
+  try {
+    await runTransaction(db, async (tx) => {
+      const roomSnap = await tx.get(roomRef);
+      if (!roomSnap.exists()) throw new Error('ROOM_NOT_FOUND');
+      const roomData = roomSnap.data();
+      if (roomData.status !== 'seating') throw new Error('NOT_SEATING');
 
-            tx.update(seatRef, {
-              occupiedBy: user.uid,
-              occupiedName: st.name,
-              occupiedGender: st.gender,
+      const stSnap = await tx.get(studentRef);
+      if (!stSnap.exists()) throw new Error('NOT_JOINED');
+      const st = stSnap.data();
+
+      const sSnap = await tx.get(seatRef);
+      if (!sSnap.exists()) throw new Error('SEAT_NOT_FOUND');
+      const s = sSnap.data();
+
+      if (s.occupiedBy) throw new Error('OCCUPIED');
+
+      // 제한 체크
+      const r = s.restriction || 'A';
+      if (r === 'M' && st.gender !== 'M') throw new Error('RESTRICT_M');
+      if (r === 'F' && st.gender !== 'F') throw new Error('RESTRICT_F');
+
+      // ✅ 2) "이전 자리"는 seats 스냅샷이 아니라 학생 문서 currentSeatId로 처리
+      const prevSeatId = st.currentSeatId || null;
+
+      // 같은 자리를 다시 누르는 경우는 그냥 종료(불필요 업데이트 방지)
+      if (prevSeatId && prevSeatId === seatId) return;
+
+      // ✅ 3) 이전 자리 먼저 비우기 (서버 기준 정확한 seat 문서)
+      if (prevSeatId) {
+        const prevRef = doc(db, 'rooms', roomCode, 'seats', prevSeatId);
+        const prevSnap = await tx.get(prevRef);
+        if (prevSnap.exists()) {
+          const prev = prevSnap.data();
+          // 내가 앉아있던 자리일 때만 비움
+          if (prev.occupiedBy === user.uid) {
+            tx.update(prevRef, {
+              occupiedBy: null,
+              occupiedName: null,
+              occupiedGender: null,
               updatedAt: serverTimestamp(),
             });
-          });
-
-          toast(setToastMsg, '자리 선택 완료!');
-        } catch (e) {
-          console.error(e);
-
-          if (e?.code === 'permission-denied') {
-            return alertModal(
-              '선택 불가 (권한)',
-              `Firestore Rules에서 학생이 seats 문서를 update 할 권한이 없습니다.\n\ncode: ${e.code}\nmsg: ${e.message}\n\n※ Rules를 보여주면 바로 수정해줄게요.`
-            );
           }
-
-          const msg =
-            e.message === 'OCCUPIED' ? '이미 누군가 앉아 있어요.' :
-            e.message === 'RESTRICT_M' ? '이 자리는 남학생만 앉을 수 있어요.' :
-            e.message === 'RESTRICT_F' ? '이 자리는 여학생만 앉을 수 있어요.' :
-            e.message === 'NOT_SEATING' ? '아직 선택 시간이 아니에요.' :
-            e.message === 'NOT_JOINED' ? '먼저 교실에 입장해주세요.' :
-            `선택에 실패했어요.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`;
-          await alertModal('선택 불가', msg);
         }
-      };
+      }
+
+      // ✅ 4) 새 자리 배정
+      tx.update(seatRef, {
+        occupiedBy: user.uid,
+        occupiedName: st.name,
+        occupiedGender: st.gender,
+        updatedAt: serverTimestamp(),
+      });
+
+      // ✅ 5) 학생 문서에 현재 자리 기록(핵심)
+      tx.update(studentRef, {
+        currentSeatId: seatId,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    toast(setToastMsg, '자리 선택 완료!');
+    // ✅ 성공 후 1초 쿨다운
+    pickLockUntilRef.current = nowMs() + 1000;
+  } catch (e) {
+    console.error(e);
+
+    if (e?.code === 'permission-denied') {
+      return alertModal(
+        '선택 불가 (권한)',
+        `Firestore Rules에서 학생이 seats 문서를 update 할 권한이 없습니다.\n\ncode: ${e.code}\nmsg: ${e.message}\n\n※ Rules를 보여주면 바로 수정해줄게요.`
+      );
+    }
+
+    const msg =
+      e.message === 'OCCUPIED' ? '이미 누군가 앉아 있어요.' :
+      e.message === 'RESTRICT_M' ? '이 자리는 남학생만 앉을 수 있어요.' :
+      e.message === 'RESTRICT_F' ? '이 자리는 여학생만 앉을 수 있어요.' :
+      e.message === 'NOT_SEATING' ? '아직 선택 시간이 아니에요.' :
+      e.message === 'NOT_JOINED' ? '먼저 교실에 입장해주세요.' :
+      `선택에 실패했어요.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`;
+
+    await alertModal('선택 불가', msg);
+  } finally {
+    pickInFlightRef.current = false;
+  }
+};
 
       /*******************************************************
        * 관리자 자리 조정(학생 이동)
@@ -1078,14 +1136,23 @@
             }
 
             updates.push([seatRef, {
-              occupiedBy: stUid,
-              occupiedName: st.name,
-              occupiedGender: st.gender,
-              updatedAt: serverTimestamp(),
-            }]);
+  occupiedBy: stUid,
+  occupiedName: st.name,
+  occupiedGender: st.gender,
+  updatedAt: serverTimestamp(),
+}]);
 
-            for (const [ref, data] of updates) tx.update(ref, data);
-          });
+// ✅ 이동되는 학생의 currentSeatId 갱신 (updates에 추가)
+const stRef = doc(db, 'rooms', roomCode, 'students', stUid);
+updates.push([stRef, { currentSeatId: seatId, updatedAt: serverTimestamp() }]);
+
+// ✅ 자리 교환된 학생이 있으면 그 학생의 currentSeatId도 갱신 (updates에 추가)
+if (targetOccUid && oldSeatId && oldSeatId !== seatId) {
+  const occRef = doc(db, 'rooms', roomCode, 'students', targetOccUid);
+  updates.push([occRef, { currentSeatId: oldSeatId, updatedAt: serverTimestamp() }]);
+}
+
+for (const [ref, data] of updates) tx.update(ref, data);
 
           toast(setToastMsg, '관리자 이동 완료');
         } catch (e) {
