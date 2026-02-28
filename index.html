@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>자리 티켓팅 프로그램 v2 (경매 모드 + 일시정지/재개 + 모달 내 오류)</title>
+  <title>자리 티켓팅 프로그램 v2 (경매 모드 + 일시정지/재개)</title>
 
   <link rel="icon" href="data:," />
 
@@ -193,7 +193,7 @@
     };
 
     /*******************************************************
-     * Auction Modal (모달 내부 1초 타이머 + 모달 내부 오류 메시지)
+     * Auction Modal (✅ "낮은 입찰"은 모달 안에서만 에러로 처리)
      *******************************************************/
     function AuctionModal({
       seat,
@@ -205,7 +205,7 @@
       onSubmit,
       onCancel,
       disabled,
-      errorMsg,
+      errorMsg, // ✅ 추가
     }) {
       const [leftSec, setLeftSec] = React.useState(0);
 
@@ -296,11 +296,12 @@
               </div>
             </div>
 
-            {errorMsg && (
+            {/* ✅ 낮은 입찰/형식 오류는 여기서만 표시 (전역 alert X) */}
+            {errorMsg ? (
               <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-bold">
                 {errorMsg}
               </div>
-            )}
+            ) : null}
 
             <div className="mt-6 flex gap-3 justify-end">
               <button
@@ -396,6 +397,7 @@
       );
     }
 
+    // ✅ 문(door) 장식
     function Door({ position = "top" }) {
       return (
         <div
@@ -416,6 +418,7 @@
       );
     }
 
+    // ✅ 좌석(학생 친화 스타일)
     const SeatTile = React.memo(function SeatTile({
       seat,
       isSelected,
@@ -439,6 +442,7 @@
             ? "ring-4 ring-rose-300"
             : "ring-2 ring-transparent hover:ring-2 hover:ring-stone-300";
 
+      // ✅ 표시 가격: price가 있으면 price, 없으면 minPrice
       const shownPrice =
         Number(seat?.price || 0) > 0 ? Number(seat.price || 0) : Number(seat?.minPrice || 0);
 
@@ -482,6 +486,9 @@
       );
     });
 
+    /*******************************************************
+     * 학생 친화 교실 UI + 좌석 그리드
+     *******************************************************/
     function SeatCanvas({
       isAdmin,
       seats,
@@ -495,10 +502,12 @@
       auctionEnabled,
       currentUid,
     }) {
+      // 관리자 클릭 이동용 상태
       const [pendingMoveSeatId, setPendingMoveSeatId] = React.useState(null);
 
       const seatList = React.useMemo(() => Object.values(seats || {}), [seats]);
 
+      // cellKey -> seat
       const seatByCell = React.useMemo(() => {
         const m = new Map();
         for (const s of seatList) {
@@ -514,11 +523,13 @@
       }, [seatByCell]);
 
       const handleCellClick = React.useCallback(async (row, col) => {
+        // 학생/편집불가면: 선택 해제만
         if (!editable || !isAdmin) {
           setSelectedSeatId(null);
           return;
         }
 
+        // 이동 대기중이면: 스왑 or 빈칸 이동
         if (pendingMoveSeatId) {
           const targetSeatId = seatIdAtCell(row, col);
 
@@ -533,10 +544,12 @@
           return;
         }
 
+        // 이동대기 없으면: 선택 해제
         setSelectedSeatId(null);
       }, [editable, isAdmin, pendingMoveSeatId, seatIdAtCell, onSeatSwap, onSeatMoveToCell, setSelectedSeatId]);
 
       const handleSeatClick = React.useCallback(async (seatId) => {
+        // 관리자 + 편집 가능일 때: 배정모드 우선 처리 → 아니면 이동대기 토글
         if (isAdmin && editable) {
           const handled = await onSeatClick?.(seatId);
           if (handled) return;
@@ -546,6 +559,7 @@
           return;
         }
 
+        // 학생/일반 클릭
         setSelectedSeatId(seatId);
         await onSeatClick?.(seatId);
       }, [isAdmin, editable, onSeatClick, setSelectedSeatId]);
@@ -558,6 +572,7 @@
 
       return (
         <div className="bg-white rounded-3xl shadow-sm border border-stone-200 overflow-hidden">
+          {/* ✅ 칠판 */}
           <div className="bg-[#1F4D34] text-white px-6 py-6">
             <div className="max-w-5xl mx-auto text-center">
               <div className="tracking-[0.3em] text-2xl font-black">CHALK BOARD</div>
@@ -568,17 +583,20 @@
           </div>
 
           <div className="bg-gradient-to-b from-[#f5f1ea] to-[#efe7dc] px-4 py-6">
+            {/* ✅ 교탁 */}
             <div className="max-w-5xl mx-auto flex justify-center">
               <div className="w-[220px] h-[46px] rounded-b-2xl bg-[#8B6B5D] shadow-md flex items-center justify-center text-white font-black tracking-widest">
                 TEACHER
               </div>
             </div>
 
+            {/* ✅ 교실 프레임 */}
             <div className="max-w-5xl mx-auto mt-5">
               <div className="relative rounded-[36px] bg-white/90 shadow-lg border border-white p-6 md:p-8">
                 <Door position="top" />
                 <Door position="bottom" />
 
+                {/* 안내 */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="font-black text-stone-700">교실</div>
                   <div className="text-xs text-stone-500 font-bold">
@@ -590,6 +608,7 @@
                   </div>
                 </div>
 
+                {/* ✅ 그리드 */}
                 <div className="w-full overflow-auto" style={{ height }}>
                   <div className="w-full flex justify-center">
                     <div className="relative">
@@ -641,6 +660,114 @@
     }
 
     /*******************************************************
+     * 뷰들
+     *******************************************************/
+    function AdminCreateView({ adminRoomCode, setAdminRoomCode, setScreen, createRoom, user }) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 pb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
+            <div className="text-lg font-black">관리자: 교실 생성/입장</div>
+          </div>
+
+          <Card title="교실 정보">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-bold">교실 코드</label>
+                <input
+                  value={adminRoomCode}
+                  onChange={(e) => setAdminRoomCode(e.target.value)}
+                  placeholder="예: 6A1"
+                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-sky-300 font-mono"
+                />
+                <div className="mt-2 text-xs text-stone-500">* 이미 있는 교실 코드를 입력하면 해당 교실로 입장합니다.</div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={createRoom}
+                disabled={!user}
+                className="px-5 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black"
+              >
+                교실 생성/입장
+              </button>
+              <button
+                onClick={() => setScreen('home')}
+                className="px-5 py-3 rounded-xl bg-stone-200 hover:bg-stone-300 font-black"
+              >
+                취소
+              </button>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    function StudentJoinView({
+      joinRoomCode, setJoinRoomCode,
+      studentName, setStudentName,
+      studentGender, setStudentGender,
+      ensureStudentDoc, setScreen
+    }) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 pb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
+            <div className="text-lg font-black">학생: 교실 입장</div>
+          </div>
+
+          <Card title="입장 정보">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-bold">교실 코드</label>
+                <input
+                  value={joinRoomCode}
+                  onChange={(e) => setJoinRoomCode(e.target.value)}
+                  placeholder="예: 6A1"
+                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-bold">이름</label>
+                <input
+                  value={studentName}
+                  onChange={(e) => setStudentName(e.target.value)}
+                  placeholder="예: 김지민"
+                  className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-sm font-bold">성별</label>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => setStudentGender('M')}
+                  className={`px-4 py-2 rounded-xl font-black ${studentGender==='M'?'bg-sky-200':'bg-stone-200 hover:bg-stone-300'}`}
+                >남</button>
+                <button
+                  onClick={() => setStudentGender('F')}
+                  className={`px-4 py-2 rounded-xl font-black ${studentGender==='F'?'bg-pink-200':'bg-stone-200 hover:bg-stone-300'}`}
+                >여</button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => ensureStudentDoc(joinRoomCode, studentName, studentGender)}
+                className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
+              >
+                입장하기
+              </button>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    /*******************************************************
      * Main App
      *******************************************************/
     function App() {
@@ -671,6 +798,7 @@
       const joinedCount = React.useMemo(() => Object.keys(students || {}).length, [students]);
       const seatCount = React.useMemo(() => Object.keys(seats || {}).length, [seats]);
 
+      // lobby일 때 capacity sync
       const capSyncRef = React.useRef(null);
       React.useEffect(() => {
         if (!room || !isAdmin) return;
@@ -697,6 +825,7 @@
         return found?.id ?? null;
       }, [seats, students, user]);
 
+      // auth init
       React.useEffect(() => {
         const init = async () => {
           try {
@@ -740,11 +869,13 @@
           const roomRef = doc(db, 'rooms', code);
           const snap = await getDoc(roomRef);
 
+          // ✅ 이미 존재하면: 입장
           if (snap.exists()) {
             const data = snap.data();
             if (data.adminUid && user?.uid && data.adminUid !== user.uid) {
               return alertModal('관리자 권한 없음', '이미 생성된 교실이지만, 이 교실의 관리자가 아닙니다.');
             }
+
             toast(setToastMsg, `기존 교실로 입장: ${code}`);
             setRoomCode(code);
             setRole('admin');
@@ -752,6 +883,7 @@
             return;
           }
 
+          // ✅ 없으면: 새로 생성
           await setDoc(roomRef, {
             code,
             adminUid: user.uid,
@@ -927,6 +1059,7 @@
         toast(setToastMsg, '삭제했어요.');
       };
 
+      // ✅ 관리자 "위치 스왑"
       const swapSeats = async (aId, bId) => {
         if (!isAdmin) return;
         if (!aId || !bId || aId === bId) return;
@@ -953,7 +1086,7 @@
           });
         } catch (e) {
           console.error('swapSeats failed', e);
-          await alertModal('스왑 실패', `책상 위치 교환에 실패했습니다.\n\nmsg: ${e?.message || '-'}`);
+          await alertModal('스왑 실패', `책상 위치 교환에 실패했습니다.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`);
         }
       };
 
@@ -999,6 +1132,7 @@
         });
       };
 
+      // ✅ 배치 종료(=일시정지)
       const pauseSeating = async () => {
         if (!isAdmin) return;
         const ok = await confirmModal('일시정지', '일시정지하면 학생들은 더 이상 선택/변경할 수 없습니다.\n(현재 상태는 그대로 유지됩니다)\n일시정지할까요?');
@@ -1011,7 +1145,7 @@
           updatedAt: serverTimestamp(),
         });
 
-        // (권장) 입찰 잠금 해제
+        // ✅ (권장) 입찰 잠금 해제
         try {
           const list = Object.values(seats || {});
           await Promise.all(list.map((s) => {
@@ -1024,6 +1158,7 @@
         toast(setToastMsg, '일시정지 했어요.');
       };
 
+      // ✅ 배치 시작(=재개)
       const resumeSeating = async () => {
         if (!isAdmin) return;
         const ok = await confirmModal('배치 재개', '배치를 다시 시작할까요?\n(현재 자리 상태는 그대로 유지됩니다)');
@@ -1038,6 +1173,7 @@
         toast(setToastMsg, '배치를 다시 시작했어요!');
       };
 
+      // ✅ 경매 모드 토글
       const toggleAuction = async () => {
         if (!isAdmin || !room) return;
         const ok = await confirmModal(
@@ -1054,7 +1190,7 @@
       };
 
       /*******************************************************
-       * 학생 선착순 자리 선택
+       * ✅ 학생 자리 선택 (선착순 모드) - currentSeatId 기반
        *******************************************************/
       const pickInFlightRef = React.useRef(false);
       const pickLockUntilRef = React.useRef(0);
@@ -1132,13 +1268,16 @@
           toast(setToastMsg, '자리 선택 완료!');
           pickLockUntilRef.current = nowMs() + 1000;
         } catch (e) {
+          console.error(e);
+
           const msg =
             e.message === 'OCCUPIED' ? '이미 누군가 앉아 있어요.' :
             e.message === 'RESTRICT_M' ? '이 자리는 남학생만 앉을 수 있어요.' :
             e.message === 'RESTRICT_F' ? '이 자리는 여학생만 앉을 수 있어요.' :
             e.message === 'NOT_SEATING' ? '지금은 선택 시간이 아니에요.' :
             e.message === 'NOT_JOINED' ? '먼저 교실에 입장해주세요.' :
-            '선택에 실패했어요.';
+            `선택에 실패했어요.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`;
+
           await alertModal('선택 불가', msg);
         } finally {
           pickInFlightRef.current = false;
@@ -1146,13 +1285,16 @@
       };
 
       /*******************************************************
-       * 경매 모드
+       * ✅ 경매 모드: 잠금 획득/해제 + 입찰 제출
        *******************************************************/
       const [auctionOpen, setAuctionOpen] = React.useState(false);
       const [auctionSeatId, setAuctionSeatId] = React.useState(null);
       const [auctionBid, setAuctionBid] = React.useState("");
       const [auctionBusy, setAuctionBusy] = React.useState(false);
-      const [auctionError, setAuctionError] = React.useState(null); // ✅ 모달 내부 오류
+
+      // ✅ 핵심: 낮은 입찰/형식 오류를 "전역 alert"로 띄우지 않고 모달 안에서 표시
+      const [auctionError, setAuctionError] = React.useState(null);
+
       const auctionGraceUntilRef = React.useRef(0);
 
       const auctionSeat = auctionSeatId ? seats?.[auctionSeatId] : null;
@@ -1221,7 +1363,7 @@
             e.message === 'RESTRICT_F' ? '이 자리는 여학생만 입찰할 수 있어요.' :
             e.message === 'NOT_AUCTION' ? '경매 모드가 아닙니다.' :
             e.message === 'NOT_SEATING' ? '지금은 입찰할 수 없어요.' :
-            '입찰 잠금 획득에 실패했어요.';
+            '잠금 획득에 실패했어요.';
           await alertModal('입찰 불가', msg);
           return false;
         }
@@ -1242,16 +1384,15 @@
         } catch (e) {}
       };
 
-      const submitSeatBid = async (seatId, amountNumber) => {
-        if (!user || !room) throw new Error('NO_USER');
+      const submitSeatBid = async (seatId, amount) => {
+        if (!user || !room) return;
         const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
         const studentRef = doc(db, 'rooms', roomCode, 'students', user.uid);
         const roomRef = doc(db, 'rooms', roomCode);
 
-        const bid = Number(amountNumber);
-        if (!Number.isFinite(bid) || bid <= 0) throw new Error('BAD_BID');
-        if (bid % 10 !== 0) throw new Error('BAD_STEP');
+        const bid = Number(amount);
 
+        // (서버 전 검증은 onSubmit에서 하고, 여기서는 서버 트랜잭션 검증만 남겨도 됨)
         await runTransaction(db, async (tx) => {
           const roomSnap = await tx.get(roomRef);
           if (!roomSnap.exists()) throw new Error('ROOM_NOT_FOUND');
@@ -1286,7 +1427,7 @@
           minBid = roundUpTo10(minBid);
           if (bid < minBid) throw new Error('BID_TOO_LOW');
 
-          // 이전 내 자리 비우기
+          // ✅ 이전 내 자리 비우기
           const prevSeatId = st.currentSeatId || null;
           if (prevSeatId && prevSeatId !== seatId) {
             const prevRef = doc(db, 'rooms', roomCode, 'seats', prevSeatId);
@@ -1304,7 +1445,7 @@
             }
           }
 
-          // 기존 소유자 student.currentSeatId 정리
+          // ✅ 이 자리가 다른 학생 소유였으면 그 학생 currentSeatId 정리
           if (occupiedBy && occupiedBy !== user.uid) {
             const occStRef = doc(db, 'rooms', roomCode, 'students', occupiedBy);
             const occSnap = await tx.get(occStRef);
@@ -1316,6 +1457,7 @@
             }
           }
 
+          // ✅ 자리 소유 + 가격 + 잠금 해제
           tx.update(seatRef, {
             occupiedBy: user.uid,
             occupiedName: st.name,
@@ -1325,6 +1467,7 @@
             updatedAt: serverTimestamp(),
           });
 
+          // ✅ 학생 currentSeatId 업데이트
           tx.update(studentRef, {
             currentSeatId: seatId,
             updatedAt: serverTimestamp(),
@@ -1338,11 +1481,10 @@
           await alertModal('아직 선택 불가', '관리자가 배치를 시작(재개)해야 자리를 선택할 수 있어요.');
           return;
         }
-
         const ok = await acquireSeatBidLock(seatId);
         if (!ok) return;
 
-        setAuctionError(null);
+        setAuctionError(null); // ✅ 열 때 에러 초기화
         setAuctionSeatId(seatId);
 
         const seat = seats?.[seatId];
@@ -1350,6 +1492,7 @@
         const minBid = computeMinBid(seat, st);
         setAuctionBid(String(minBid));
 
+        // ✅ 스냅샷 반영 유예(겹침 방지)
         auctionGraceUntilRef.current = nowMs() + 1200;
         setAuctionOpen(true);
       };
@@ -1359,8 +1502,94 @@
         setAuctionOpen(false);
         setAuctionSeatId(null);
         setAuctionBid("");
-        setAuctionError(null);
+        setAuctionError(null); // ✅ 닫을 때 에러 초기화
         if (sid) await releaseSeatBidLock(sid);
+      };
+
+      /*******************************************************
+       * 관리자 자리 조정(학생 이동)
+       *******************************************************/
+      const adminAssignModeRef = React.useRef({ enabled: false, studentUid: null });
+      const [adminAssignEnabled, setAdminAssignEnabled] = React.useState(false);
+      const [adminSelectedStudentUid, setAdminSelectedStudentUid] = React.useState(null);
+
+      React.useEffect(() => {
+        adminAssignModeRef.current = { enabled: adminAssignEnabled, studentUid: adminSelectedStudentUid };
+      }, [adminAssignEnabled, adminSelectedStudentUid]);
+
+      const adminAssignSeat = async (seatId) => {
+        if (!isAdmin) return;
+        const stUid = adminAssignModeRef.current.studentUid;
+        if (!adminAssignModeRef.current.enabled || !stUid) return;
+
+        const target = seats?.[seatId];
+        if (!target) return;
+
+        const oldSeatId = Object.values(seats || {}).find((s) => s.occupiedBy === stUid)?.id ?? null;
+        const targetOccUid = target.occupiedBy || null;
+        const st = students?.[stUid];
+        if (!st) return;
+
+        const ok = await confirmModal('관리자 이동', `학생(${st.name})을(를) ${seatDisplayText(target)} 자리로 이동할까요?${targetOccUid ? '\n(현재 자리 사용 중인 학생과 자리 교환됩니다)' : ''}`);
+        if (!ok) return;
+
+        try {
+          await runTransaction(db, async (tx) => {
+            const roomSnap = await tx.get(doc(db, 'rooms', roomCode));
+            if (!roomSnap.exists()) throw new Error('ROOM_NOT_FOUND');
+
+            const seatRef = doc(db, 'rooms', roomCode, 'seats', seatId);
+            const seatSnap = await tx.get(seatRef);
+            if (!seatSnap.exists()) throw new Error('SEAT_NOT_FOUND');
+
+            const updates = [];
+
+            if (oldSeatId && oldSeatId !== seatId) {
+              const oldRef = doc(db, 'rooms', roomCode, 'seats', oldSeatId);
+              const oldSnap = await tx.get(oldRef);
+              if (oldSnap.exists() && oldSnap.data().occupiedBy === stUid) {
+                updates.push([oldRef, { occupiedBy: null, occupiedName: null, occupiedGender: null, updatedAt: serverTimestamp() }]);
+              }
+            }
+
+            if (targetOccUid) {
+              const occStudentRef = doc(db, 'rooms', roomCode, 'students', targetOccUid);
+              const occSnap = await tx.get(occStudentRef);
+              const occ = occSnap.exists() ? occSnap.data() : null;
+
+              if (oldSeatId && oldSeatId !== seatId) {
+                const swapRef = doc(db, 'rooms', roomCode, 'seats', oldSeatId);
+                updates.push([swapRef, {
+                  occupiedBy: targetOccUid,
+                  occupiedName: occ?.name ?? '학생',
+                  occupiedGender: occ?.gender ?? null,
+                  updatedAt: serverTimestamp(),
+                }]);
+
+                // ✅ 교환된 학생 currentSeatId 갱신
+                updates.push([occStudentRef, { currentSeatId: oldSeatId, updatedAt: serverTimestamp() }]);
+              }
+            }
+
+            updates.push([seatRef, {
+              occupiedBy: stUid,
+              occupiedName: st.name,
+              occupiedGender: st.gender,
+              updatedAt: serverTimestamp(),
+            }]);
+
+            // ✅ 이동되는 학생 currentSeatId 갱신
+            const stRef = doc(db, 'rooms', roomCode, 'students', stUid);
+            updates.push([stRef, { currentSeatId: seatId, updatedAt: serverTimestamp() }]);
+
+            for (const [ref, data] of updates) tx.update(ref, data);
+          });
+
+          toast(setToastMsg, '관리자 이동 완료');
+        } catch (e) {
+          console.error(e);
+          await alertModal('실패', `이동에 실패했습니다.\n\ncode: ${e?.code || '-'}\nmsg: ${e?.message || '-'}`);
+        }
       };
 
       /*******************************************************
@@ -1435,7 +1664,7 @@
                 onClick={() => { setRole('admin'); setRoomCode(''); setJoinRoomCode(''); setStudentName(''); setAdminRoomCode(''); setScreen('adminCreate'); }}
               >
                 <div className="text-lg font-black">관리자</div>
-                <div className="text-sm text-stone-700 mt-1">교실 생성/입장 · 자리 배치 · 티켓팅 시작/일시정지/재개 · (경매 모드)</div>
+                <div className="text-sm text-stone-700 mt-1">교실 생성/입장 · 자리 배치 · 티켓팅 시작/일시정지/재개 · 학생 자리 조정 · (경매 모드)</div>
               </button>
               <button
                 className="p-5 rounded-2xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-left"
@@ -1463,113 +1692,14 @@
         return <span className={`px-3 py-1 rounded-full text-xs font-black ${meta.cls}`}>{meta.text}</span>;
       };
 
-      function AdminCreateView({ adminRoomCode, setAdminRoomCode, setScreen, createRoom, user }) {
-        return (
-          <div className="max-w-3xl mx-auto px-4 pb-10">
-            <div className="flex items-center gap-3 mb-4">
-              <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
-              <div className="text-lg font-black">관리자: 교실 생성/입장</div>
-            </div>
-
-            <Card title="교실 정보">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-bold">교실 코드</label>
-                  <input
-                    value={adminRoomCode}
-                    onChange={(e) => setAdminRoomCode(e.target.value)}
-                    placeholder="예: 6A1"
-                    className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-sky-300 font-mono"
-                  />
-                  <div className="mt-2 text-xs text-stone-500">* 이미 있는 교실 코드를 입력하면 해당 교실로 입장합니다.</div>
-                </div>
-              </div>
-
-              <div className="mt-5 flex gap-3">
-                <button
-                  onClick={createRoom}
-                  disabled={!user}
-                  className="px-5 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black"
-                >
-                  교실 생성/입장
-                </button>
-                <button
-                  onClick={() => setScreen('home')}
-                  className="px-5 py-3 rounded-xl bg-stone-200 hover:bg-stone-300 font-black"
-                >
-                  취소
-                </button>
-              </div>
-            </Card>
-          </div>
-        );
-      }
-
-      function StudentJoinView({
-        joinRoomCode, setJoinRoomCode,
-        studentName, setStudentName,
-        studentGender, setStudentGender,
-        ensureStudentDoc, setScreen
-      }) {
-        return (
-          <div className="max-w-3xl mx-auto px-4 pb-10">
-            <div className="flex items-center gap-3 mb-4">
-              <button onClick={() => setScreen('home')} className="px-3 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-bold">←</button>
-              <div className="text-lg font-black">학생: 교실 입장</div>
-            </div>
-
-            <Card title="입장 정보">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-bold">교실 코드</label>
-                  <input
-                    value={joinRoomCode}
-                    onChange={(e) => setJoinRoomCode(e.target.value)}
-                    placeholder="예: 6A1"
-                    className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-bold">이름</label>
-                  <input
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    placeholder="예: 김지민"
-                    className="mt-2 w-full px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <label className="text-sm font-bold">성별</label>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => setStudentGender('M')}
-                    className={`px-4 py-2 rounded-xl font-black ${studentGender==='M'?'bg-sky-200':'bg-stone-200 hover:bg-stone-300'}`}
-                  >남</button>
-                  <button
-                    onClick={() => setStudentGender('F')}
-                    className={`px-4 py-2 rounded-xl font-black ${studentGender==='F'?'bg-pink-200':'bg-stone-200 hover:bg-stone-300'}`}
-                  >여</button>
-                </div>
-              </div>
-
-              <div className="mt-5 flex gap-3">
-                <button
-                  onClick={() => ensureStudentDoc(joinRoomCode, studentName, studentGender)}
-                  className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
-                >
-                  입장하기
-                </button>
-              </div>
-            </Card>
-          </div>
-        );
-      }
-
       const AdminRoom = () => {
-        if (roomLoading) return <div className="max-w-3xl mx-auto px-4 pb-10 text-center py-10 text-stone-600">불러오는 중...</div>;
+        if (roomLoading) {
+          return (
+            <div className="max-w-3xl mx-auto px-4 pb-10">
+              <div className="text-center py-10 text-stone-600">불러오는 중...</div>
+            </div>
+          );
+        }
         if (!room) {
           return (
             <div className="max-w-3xl mx-auto px-4 pb-10">
@@ -1591,7 +1721,21 @@
           );
         }
 
+        const selectedSeat = selectedSeatId ? seats?.[selectedSeatId] : null;
         const auctionEnabled = room.auctionEnabled === true;
+
+        const [minPriceInput, setMinPriceInput] = React.useState("");
+        React.useEffect(() => {
+          if (!selectedSeat) { setMinPriceInput(""); return; }
+          setMinPriceInput(String(Number(selectedSeat.minPrice || 0)));
+        }, [selectedSeatId, selectedSeat?.minPrice]);
+
+        const saveMinPrice = async () => {
+          if (!selectedSeat) return;
+          const v = roundUpTo10(minPriceInput);
+          await updateSeat(selectedSeat.id, { minPrice: v });
+          toast(setToastMsg, `최소 가격 설정: ${seatDisplayText(selectedSeat)} → ₩${v}`);
+        };
 
         return (
           <div className="max-w-6xl mx-auto px-4 pb-10">
@@ -1618,7 +1762,13 @@
                   seats={seats}
                   selectedSeatId={selectedSeatId}
                   setSelectedSeatId={setSelectedSeatId}
-                  onSeatClick={async () => false}
+                  onSeatClick={async (sid) => {
+                    if (adminAssignEnabled) {
+                      await adminAssignSeat(sid);
+                      return true;
+                    }
+                    return false;
+                  }}
                   onSeatMoveToCell={async (sid, pos) => updateSeat(sid, pos)}
                   onSeatSwap={swapSeats}
                   editable={room.status === 'lobby'}
@@ -1642,29 +1792,21 @@
                       >
                         경매 모드 {auctionEnabled ? 'ON' : 'OFF'}
                       </button>
-                      <button
-                        onClick={addSeat}
-                        disabled={room.status !== 'lobby'}
-                        className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black"
-                      >
-                        책상 추가
-                      </button>
-                      <button
-                        onClick={autoLayout}
-                        disabled={room.status !== 'lobby'}
-                        className="px-4 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 disabled:opacity-50 font-black"
-                      >
-                        자동 배치
-                      </button>
                     </div>
 
                     {room.status === 'lobby' && (
-                      <div className="mt-4">
+                      <div className="mt-4 flex flex-wrap gap-2">
                         <button
                           onClick={startTicketing}
                           className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
                         >
                           배치 시작 (10초 카운트)
+                        </button>
+                        <button
+                          onClick={autoLayout}
+                          className="px-4 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 font-black"
+                        >
+                          자동 배치
                         </button>
                       </div>
                     )}
@@ -1690,28 +1832,122 @@
                     {room.status === 'paused' && (
                       <div className="mt-4">
                         <div className="text-sm text-stone-700 mb-3">일시정지 중입니다. (현 상태 유지)</div>
-                        <button onClick={resumeSeating} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black">
-                          배치 시작(재개)
-                        </button>
+                        <div className="flex gap-2 flex-wrap">
+                          <button onClick={resumeSeating} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black">
+                            배치 시작(재개)
+                          </button>
+                        </div>
                       </div>
                     )}
                   </Card>
 
-                  <Card title="자리 편집 (대기중에만)" right={<div className="text-xs text-stone-600">현재: {room.status}</div>}>
-                    <div className="text-sm text-stone-700">대기중(lobby)일 때만 “클릭 이동/스왑”을 사용할 수 있어요.</div>
+                  <Card title="관리자 자리 조정">
+                    <div className="text-sm text-stone-700">
+                      1) 학생을 선택 → 2) 교실에서 책상을 클릭하면 해당 자리로 이동합니다.
+                    </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={() => setAdminAssignEnabled((v) => !v)}
+                        className={`px-4 py-2 rounded-xl font-black ${adminAssignEnabled ? 'bg-amber-500 text-white' : 'bg-stone-200 hover:bg-stone-300'}`}
+                      >
+                        {adminAssignEnabled ? '이동 모드 ON' : '이동 모드 OFF'}
+                      </button>
+                      <div className="text-xs text-stone-500">(이동 모드 ON일 때만 클릭 이동)</div>
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="text-sm font-bold">학생 선택</label>
+                      <select
+                        value={adminSelectedStudentUid || ''}
+                        onChange={(e) => setAdminSelectedStudentUid(e.target.value || null)}
+                        className="mt-2 w-full px-3 py-2 rounded-xl border border-stone-200"
+                      >
+                        <option value="">선택하세요</option>
+                        {Object.values(students || {}).map((s) => (
+                          <option key={s.id} value={s.id}>{s.name} ({genderLabel(s.gender)})</option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div className="mt-3 text-xs text-stone-500">
-                      (이 버전은 경매/일시정지/재개 + 학생 구매 흐름 안정화에 초점)
+                      * 자리 제한(남/여 전용)은 학생 선택에는 적용되지만, 관리자는 필요 시 강제로 이동시킬 수 있습니다.
                     </div>
                   </Card>
                 </div>
               </div>
 
               <div className="lg:col-span-1 space-y-5">
+                <Card title="자리 편집 (대기중에만 가능)" right={<div className="text-xs text-stone-600">현재: {room.status}</div>}>
+                  <div className="text-sm text-stone-700">대기중(lobby)일 때만 “클릭 이동/스왑”으로 배치를 바꿀 수 있어요.</div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      onClick={addSeat}
+                      disabled={room.status !== 'lobby'}
+                      className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-black"
+                    >
+                      책상 추가
+                    </button>
+                  </div>
+
+                  <div className="mt-4 p-4 rounded-xl bg-stone-50 border border-stone-200">
+                    <div className="text-sm font-black">선택된 책상</div>
+                    {selectedSeat ? (
+                      <div className="mt-2">
+                        <div className="text-sm text-stone-700">
+                          번호: <span className="font-black">{seatDisplayText(selectedSeat)}</span>
+                        </div>
+                        <div className="text-sm text-stone-700">
+                          제한: <span className="font-black">{restrictionMeta[selectedSeat.restriction || 'A']?.label}</span>
+                        </div>
+
+                        {/* ✅ 경매: 최소가격 설정 */}
+                        <div className="mt-3">
+                          <div className="text-sm font-black text-stone-700">경매 최소 가격(교사 설정)</div>
+                          <div className="mt-2 flex gap-2">
+                            <input
+                              value={minPriceInput}
+                              onChange={(e) => setMinPriceInput(e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl border border-stone-200 font-black"
+                              inputMode="numeric"
+                              placeholder="예: 100"
+                            />
+                            <button
+                              onClick={saveMinPrice}
+                              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black"
+                            >
+                              저장
+                            </button>
+                          </div>
+                          <div className="mt-1 text-xs text-stone-500">* 10단위로 자동 보정됩니다.</div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            onClick={() => cycleRestriction(selectedSeat.id)}
+                            disabled={room.status !== 'lobby'}
+                            className="px-4 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 disabled:opacity-50 font-black"
+                          >
+                            제한 변경 (공용→남→여)
+                          </button>
+                          <button
+                            onClick={() => deleteSeat(selectedSeat.id)}
+                            disabled={room.status !== 'lobby'}
+                            className="px-4 py-2 rounded-xl bg-rose-200 hover:bg-rose-300 disabled:opacity-50 font-black"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-sm text-stone-500">책상을 클릭해 선택하세요.</div>
+                    )}
+                  </div>
+                </Card>
+
                 <Card title="입장한 학생 목록" right={<div className="text-xs text-stone-600">{joinedCount}명</div>}>
-                  <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
+                  <div className="space-y-2 max-h-[360px] overflow-auto pr-1">
                     {Object.values(students || {}).map((s) => {
                       const seatObj = Object.values(seats || {}).find((x) => x.occupiedBy === s.id) || null;
-                      const shown = seatObj ? (Number(seatObj.price || 0) || Number(seatObj.minPrice || 0)) : 0;
                       return (
                         <div key={s.id} className="p-3 rounded-xl bg-stone-50 border border-stone-200">
                           <div className="flex items-center justify-between">
@@ -1720,7 +1956,7 @@
                           </div>
                           <div className="text-xs text-stone-600 mt-1">
                             자리: {seatObj ? <span className="font-black">{seatDisplayText(seatObj)}</span> : '미배정'}
-                            {seatObj && room.auctionEnabled ? <span className="ml-2 font-black text-emerald-700">₩{shown}</span> : null}
+                            {seatObj && room.auctionEnabled ? <span className="ml-2 font-black text-emerald-700">₩{Number(seatObj.price || 0) || Number(seatObj.minPrice || 0)}</span> : null}
                           </div>
                         </div>
                       );
@@ -1735,7 +1971,13 @@
       };
 
       const StudentRoom = () => {
-        if (roomLoading) return <div className="max-w-3xl mx-auto px-4 pb-10 text-center py-10 text-stone-600">불러오는 중...</div>;
+        if (roomLoading) {
+          return (
+            <div className="max-w-3xl mx-auto px-4 pb-10">
+              <div className="text-center py-10 text-stone-600">불러오는 중...</div>
+            </div>
+          );
+        }
         if (!room) {
           return (
             <div className="max-w-3xl mx-auto px-4 pb-10">
@@ -1750,16 +1992,21 @@
         const me = students?.[user.uid];
         const auctionEnabled = room.auctionEnabled === true;
 
-        // ✅ 모달이 열려 있을 때만, seats 스냅샷을 보며 락 만료/일시정지 등을 체크
+        // ✅ 경매 모달 자동 종료/안내 (모달이 열려 있을 때만 0.5초 체크)
         React.useEffect(() => {
           if (!auctionOpen) return;
 
           const t = setInterval(() => {
             if (!auctionSeatId) return;
 
+            // 오픈 직후 유예
             if (nowMs() < (auctionGraceUntilRef.current || 0)) return;
 
-            // seating이 아니면 닫기
+            const curSeat = seats?.[auctionSeatId] || null;
+            const lock = curSeat?.bidLock || null;
+            const active = isLockActive(lock);
+            const mine = lock?.uid === user.uid;
+
             if (room.status !== 'seating') {
               setAuctionOpen(false);
               setAuctionSeatId(null);
@@ -1768,17 +2015,11 @@
               return;
             }
 
-            const curSeat = seats?.[auctionSeatId] || null;
-            const lock = curSeat?.bidLock || null;
-            const active = isLockActive(lock);
-            const mine = lock?.uid === user.uid;
-
             if (!curSeat || !active || !mine) {
               setAuctionOpen(false);
               setAuctionSeatId(null);
               setAuctionBid("");
               setAuctionError(null);
-              // 전역 모달은 1번만 보여주기 위해 error state가 있을 때는 생략해도 되지만, 여기서는 안내만.
               setTimeout(() => {
                 alertModal('입찰 종료', '입찰 시간이 만료되었거나 잠금이 해제되었습니다.\n다시 좌석을 클릭해 주세요.');
               }, 0);
@@ -1842,7 +2083,6 @@
                     setSelectedSeatId={setSelectedSeatId}
                     onSeatClick={async (sid) => {
                       if (room.status !== 'seating') return;
-
                       if (auctionEnabled) {
                         await openAuctionForSeat(sid);
                         return;
@@ -1876,6 +2116,18 @@
                     </div>
                   </Card>
 
+                  <Card title="자리 색상 안내">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#CFEFFF] border border-sky-300"></span><span className="font-bold">파랑(남):</span> 남학생만</div>
+                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#FFD7E8] border border-pink-300"></span><span className="font-bold">분홍(여):</span> 여학생만</div>
+                      <div className="flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#FFF2B2] border border-amber-200"></span><span className="font-bold">노랑(공용):</span> 모두 가능</div>
+                    </div>
+                  </Card>
+
+                  <Card title="현재 입장 인원">
+                    <div className="text-sm text-stone-700">{joinedCount} / {seatCount}명</div>
+                  </Card>
+
                   {auctionEnabled && (
                     <Card title="경매 안내">
                       <div className="text-sm text-stone-700">
@@ -1897,36 +2149,40 @@
                 expiresAtMillis={auctionSeat?.bidLock?.expiresAt?.toMillis?.() ?? null}
                 bid={auctionBid}
                 onChangeBid={(v) => {
-                  setAuctionError(null); // ✅ 입력하면 오류 지움
+                  setAuctionError(null); // ✅ 입력 바꾸면 에러 지움
                   setAuctionBid(v.replace(/[^\d]/g, ''));
                 }}
                 disabled={auctionBusy}
-                errorMsg={auctionError}
+                errorMsg={auctionError}  // ✅ 추가
                 onCancel={async () => { await closeAuction(); }}
                 onSubmit={async () => {
                   if (auctionBusy) return;
 
-                  // ✅ 1) 클라이언트에서 먼저 검증 (서버 호출 전 차단)
+                  // ✅ 1) 먼저 "로컬 검증"으로 BID_TOO_LOW 상황을 막고,
+                  // ✅ 2) 실패해도 버튼/모달이 멈추지 않게 함 (이게 지금 버그의 핵심)
                   const bidNum = Number(auctionBid);
                   if (!Number.isFinite(bidNum) || bidNum <= 0) {
                     setAuctionError('입찰 금액을 숫자로 입력해주세요.');
                     return;
                   }
                   if (bidNum % 10 !== 0) {
-                    setAuctionError('입찰 금액은 10단위로 입력해주세요. (예: 100, 110)');
+                    setAuctionError('입찰 금액은 10단위로 입력해주세요. (예: 100, 110, 120)');
                     return;
                   }
                   if (bidNum < minBid) {
-                    setAuctionError(`입찰 금액이 너무 낮아요. 최소 입찰은 ${minBid}원입니다.`);
+                    setAuctionError(`입찰 금액이 너무 낮아요. 최소 입찰은 ${minBid}원 입니다.`);
+                    // ✅ 아래처럼 자동으로 최소로 맞춰주고 싶으면 주석 해제
+                    // setAuctionBid(String(minBid));
                     return;
                   }
 
-                  // ✅ 2) 서버 호출
-                  setAuctionError(null);
                   setAuctionBusy(true);
-                  try {
-                    await submitSeatBid(auctionSeat.id, bidNum);
+                  setAuctionError(null);
 
+                  try {
+                    await submitSeatBid(auctionSeat.id, auctionBid);
+
+                    // ✅ 성공 시 닫기
                     setAuctionOpen(false);
                     setAuctionSeatId(null);
                     setAuctionBid("");
@@ -1934,13 +2190,14 @@
 
                     toast(setToastMsg, '경매 구매 완료!');
                   } catch (e) {
+                    // ✅ 서버에서 실패해도 "모달 내부"에만 표시 (전역 alert 남발 방지)
                     const msg =
-                      e?.message === 'NO_LOCK' ? '입찰 잠금이 없습니다. 다시 좌석을 클릭해 주세요.' :
-                      e?.message === 'BID_TOO_LOW' ? `입찰 금액이 너무 낮아요. 최소 입찰은 ${minBid}원입니다.` :
-                      e?.message === 'RESTRICT_M' ? '이 자리는 남학생만 입찰할 수 있어요.' :
-                      e?.message === 'RESTRICT_F' ? '이 자리는 여학생만 입찰할 수 있어요.' :
-                      e?.message === 'NOT_AUCTION' ? '경매 모드가 아닙니다.' :
-                      e?.message === 'NOT_SEATING' ? '지금은 입찰할 수 없어요.' :
+                      e.message === 'NO_LOCK' ? '입찰 잠금이 없습니다. 다시 좌석을 클릭해 주세요.' :
+                      e.message === 'BID_TOO_LOW' ? `입찰 금액이 최소입찰보다 작습니다. (최소: ${minBid})` :
+                      e.message === 'RESTRICT_M' ? '이 자리는 남학생만 입찰할 수 있어요.' :
+                      e.message === 'RESTRICT_F' ? '이 자리는 여학생만 입찰할 수 있어요.' :
+                      e.message === 'NOT_AUCTION' ? '경매 모드가 아닙니다.' :
+                      e.message === 'NOT_SEATING' ? '지금은 입찰할 수 없어요.' :
                       '입찰에 실패했어요.';
                     setAuctionError(msg);
                   } finally {
