@@ -1260,7 +1260,7 @@
 
       React.useEffect(() => {
         if (!auctionOpen) return;
-        const t = setInterval(() => setLockTick((x) => x + 1), 300);
+        const t = setInterval(() => setLockTick((x) => x + 1), 1000);
         return () => clearInterval(t);
       }, [auctionOpen]);
 
