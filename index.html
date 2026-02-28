@@ -194,6 +194,7 @@
 
     /*******************************************************
      * Auction Modal (✅ 로컬 state로 입력 관리 + 깜빡임 최소화)
+     * - ❗중요: onCancel은 busy여도 항상 가능(먹통 탈출)
      *******************************************************/
     function AuctionModal({
       seat,
@@ -253,7 +254,6 @@
       };
 
       return (
-        // ✅ 경매 모달은 animate-fade-in 제거(리마운트/재생성 감지되면 깜빡임 유발)
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
             <div className="flex items-start justify-between gap-3">
@@ -267,7 +267,7 @@
                 onClick={onCancel}
                 className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
                 title="닫기"
-                disabled={busy}
+                /* ✅ busy여도 닫기 가능 */
               >
                 ✕
               </button>
@@ -341,7 +341,7 @@
               <button
                 onClick={onCancel}
                 className="px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 font-black"
-                disabled={busy}
+                /* ✅ busy여도 취소 가능 */
               >
                 취소
               </button>
@@ -1307,6 +1307,13 @@
       const [auctionSeatId, setAuctionSeatId] = React.useState(null);
       const [auctionBusy, setAuctionBusy] = React.useState(false);
 
+      // ✅ 보험: busy가 10초 넘으면 자동 해제(영구 비활성화 방지)
+      React.useEffect(() => {
+        if (!auctionBusy) return;
+        const t = setTimeout(() => setAuctionBusy(false), 10000);
+        return () => clearTimeout(t);
+      }, [auctionBusy]);
+
       const auctionGraceUntilRef = React.useRef(0);
       const lastAuctionSeatRef = React.useRef(null);
       const initialBidRef = React.useRef(0);
@@ -1433,7 +1440,6 @@
           }
           minBid = roundUpTo10(minBid);
 
-          // ✅ 서버에서도 최종 방어
           if (bid < minBid) throw new Error('BID_TOO_LOW');
 
           // ✅ 이전 내 자리 비우기
@@ -1522,7 +1528,7 @@
         if (cur) lastAuctionSeatRef.current = cur;
       }, [auctionOpen, auctionSeatId, seats]);
 
-      // ✅ 모달 자동 종료/안내 (모달이 열려 있을 때만 0.5초 체크 / seatsRef로 확인)
+      // ✅ 모달 자동 종료/안내
       React.useEffect(() => {
         if (!auctionOpen) return;
 
@@ -1531,7 +1537,6 @@
           const uid = user?.uid;
           if (!r || !uid) return;
 
-          // seating이 아니면 바로 닫기(일시정지 포함)
           if (r.status !== 'seating') {
             setAuctionOpen(false);
             setAuctionSeatId(null);
@@ -1540,8 +1545,6 @@
           }
 
           if (!auctionSeatId) return;
-
-          // 오픈 직후 유예
           if (nowMs() < (auctionGraceUntilRef.current || 0)) return;
 
           const curSeat = seatsRef.current?.[auctionSeatId] || lastAuctionSeatRef.current || null;
@@ -2159,7 +2162,7 @@
               </div>
             )}
 
-            {/* ✅ 모달은 auctionOpen이면 유지(좌석이 순간 undefined되어도 리마운트 방지) */}
+            {/* ✅ 모달은 auctionOpen이면 유지 */}
             {auctionOpen && (
               <AuctionModal
                 seat={stableSeat}
@@ -2171,7 +2174,6 @@
                 onSubmit={async (bidStr) => {
                   if (auctionBusy) return;
 
-                  // ✅ 최종 로컬 검증(추가 안전)
                   const bidNum = Number(bidStr);
                   if (!Number.isFinite(bidNum) || bidNum <= 0) return;
                   if (bidNum % 10 !== 0) return;
@@ -2181,19 +2183,16 @@
                   try {
                     await submitSeatBid(stableSeat?.id || auctionSeatId, bidStr);
                     toast(setToastMsg, '경매 구매 완료!');
-                    setAuctionOpen(false);
-                    setAuctionSeatId(null);
+                    // ✅ 성공 시에도 closeAuction으로 정리(상태/락/버튼 먹통 방지)
+                    await closeAuction();
                   } catch (e) {
-                    // ✅ 실패해도 busy는 반드시 풀려서 “먹통” 방지
                     if (e?.message === 'BID_TOO_LOW') {
-                      // 서버에서 가격이 올라간 케이스
                       await alertModal('입찰 실패', `입찰 금액이 최소입찰보다 작습니다.\n현재 최소입찰: ${minBid}`);
                     } else if (e?.message === 'NO_LOCK') {
                       await alertModal('입찰 실패', '입찰 잠금이 없습니다. 다시 좌석을 클릭해 주세요.');
                     } else if (e?.message === 'NOT_SEATING') {
                       await alertModal('입찰 실패', '지금은 입찰할 수 없어요.');
                     } else {
-                      // 기타
                       await alertModal('입찰 실패', '입찰에 실패했어요. 다시 시도해 주세요.');
                     }
                   } finally {
